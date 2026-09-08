@@ -1,10 +1,19 @@
 import 'package:flutter/material.dart';
 import 'models.dart';
+import 'notification_service.dart';
 
 class TaskDetailScreen extends StatefulWidget {
   final TaskItem task;
+  final int taskIndex;
   final VoidCallback onDelete;
-  const TaskDetailScreen({super.key, required this.task, required this.onDelete});
+  final VoidCallback? onChanged;
+  const TaskDetailScreen({
+    super.key,
+    required this.task,
+    required this.taskIndex,
+    required this.onDelete,
+    this.onChanged,
+  });
   @override
   State<TaskDetailScreen> createState() => _TaskDetailScreenState();
 }
@@ -32,14 +41,60 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   }
 
   void _save() {
-    widget.task.title  = _titleCtrl.text.trim().isEmpty ? widget.task.title : _titleCtrl.text.trim();
-    widget.task.meta   = _metaCtrl.text.trim();
-    final tag = _tagCtrl.text.trim();
-    widget.task.tag    = tag.isEmpty ? null : tag;
-    widget.task.tagBg  = tag.isEmpty ? null : const Color(0x33D8A93F);
-    widget.task.tagColor = tag.isEmpty ? null : kCGoldDark;
-    widget.task.budget = int.tryParse(_budgetCtrl.text.trim());
+    final t = widget.task;
+    t.title    = _titleCtrl.text.trim().isEmpty ? t.title : _titleCtrl.text.trim();
+    t.meta     = _metaCtrl.text.trim();
+    final tag  = _tagCtrl.text.trim();
+    t.tag      = tag.isEmpty ? null : tag;
+    t.tagBg    = tag.isEmpty ? null : const Color(0x33D8A93F);
+    t.tagColor = tag.isEmpty ? null : kCGoldDark;
+    t.budget   = int.tryParse(_budgetCtrl.text.trim());
+    NotificationService.cancel(widget.taskIndex);
+    NotificationService.scheduleDeadline(widget.taskIndex, t);
+    widget.onChanged?.call();
     setState(() {});
+  }
+
+  Future<void> _pickDeadline() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: widget.task.deadline ?? now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365 * 5)),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: ColorScheme.light(primary: kCGreen, onSurface: kCText),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    // ask for time too
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(widget.task.deadline ?? DateTime(now.year, now.month, now.day, 9)),
+    );
+    setState(() {
+      widget.task.deadline = DateTime(
+        picked.year, picked.month, picked.day,
+        time?.hour ?? 9, time?.minute ?? 0,
+      );
+    });
+    NotificationService.cancel(widget.taskIndex);
+    NotificationService.scheduleDeadline(widget.taskIndex, widget.task);
+    widget.onChanged?.call();
+  }
+
+  void _clearDeadline() {
+    setState(() => widget.task.deadline = null);
+    NotificationService.cancel(widget.taskIndex);
+    widget.onChanged?.call();
+  }
+
+  void _setRecurrence(String? val) {
+    setState(() => widget.task.recurrence = val);
+    widget.onChanged?.call();
   }
 
   @override
@@ -59,6 +114,12 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
             const SizedBox(width: 10),
             Expanded(child: _field('งบ (฿)', _budgetCtrl, hint: '500', keyboardType: TextInputType.number, onDone: _save)),
           ]),
+          const SizedBox(height: 20),
+          _sectionLabel('กำหนดส่ง & การแจ้งเตือน'),
+          const SizedBox(height: 10),
+          _deadlineRow(),
+          const SizedBox(height: 10),
+          _recurrenceRow(),
           const SizedBox(height: 28),
           _sectionLabel('ขั้นตอนย่อย'),
           const SizedBox(height: 10),
@@ -110,7 +171,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       TextField(
         controller: ctrl,
         maxLines: maxLines,
-        keyboardType: keyboardType,
+        keyboardType: maxLines > 1 ? TextInputType.multiline : keyboardType,
         textInputAction: maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
         onEditingComplete: onDone,
         style: const TextStyle(fontSize: 15, color: kCText, fontWeight: FontWeight.w500),
@@ -125,6 +186,77 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         ),
       ),
     ]);
+  }
+
+  Widget _deadlineRow() {
+    final d = widget.task.deadline;
+    final now = DateTime.now();
+    final isOverdue = d != null && d.isBefore(now) && !widget.task.done;
+    return GestureDetector(
+      onTap: _pickDeadline,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: isOverdue ? kCRed.withValues(alpha: .07) : kCSurf,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isOverdue ? kCRed.withValues(alpha: .3) : kCText.withValues(alpha: .1)),
+        ),
+        child: Row(children: [
+          Icon(Icons.alarm_rounded, size: 18,
+            color: isOverdue ? kCRed : d != null ? kCGreen : kCText.withValues(alpha: .4)),
+          const SizedBox(width: 10),
+          Expanded(child: d == null
+            ? Text('ตั้งกำหนดส่ง', style: TextStyle(fontSize: 14, color: kCText.withValues(alpha: .4)))
+            : Text(_fmtDeadline(d), style: TextStyle(fontSize: 14,
+                color: isOverdue ? kCRed : kCText, fontWeight: FontWeight.w600))),
+          if (d != null) GestureDetector(
+            onTap: _clearDeadline,
+            child: Icon(Icons.close, size: 16, color: kCText.withValues(alpha: .3)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _recurrenceRow() {
+    final options = <(String, String?)>[
+      ('ไม่ซ้ำ', null),
+      ('ทุกวัน', 'daily'),
+      ('ทุกสัปดาห์', 'weekly'),
+      ('ทุกเดือน', 'monthly'),
+      ('ทุกปี', 'yearly'),
+    ];
+    return Wrap(spacing: 8, runSpacing: 6, children: options.map((opt) {
+      final label = opt.$1;
+      final val   = opt.$2;
+      final active = widget.task.recurrence == val;
+      return GestureDetector(
+        onTap: () => _setRecurrence(val),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? kCGreen : kCSurf,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: active ? kCGreen : kCText.withValues(alpha: .12)),
+          ),
+          child: Text(label, style: TextStyle(
+            fontSize: 12.5, fontWeight: FontWeight.w600,
+            color: active ? Colors.white : kCText.withValues(alpha: .6))),
+        ),
+      );
+    }).toList());
+  }
+
+  String _fmtDeadline(DateTime d) {
+    final now = DateTime.now();
+    final diff = d.difference(DateTime(now.year, now.month, now.day)).inDays;
+    final timeStr = '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+    final months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    if (diff == 0) return 'วันนี้ $timeStr น.';
+    if (diff == 1) return 'พรุ่งนี้ $timeStr น.';
+    if (diff < 0) return 'เกินกำหนด ${d.day} ${months[d.month-1]}';
+    return '${d.day} ${months[d.month-1]} ${d.year + 543} · $timeStr น.';
   }
 
   Widget _sectionLabel(String text) =>

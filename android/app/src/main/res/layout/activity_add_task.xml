@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#F7F3EA"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="เพิ่มงาน"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#20291F"
+        android:gravity="center"
+        android:layout_marginBottom="20dp" />
+
+    <EditText
+        android:id="@+id/add_task_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="พิมชื่องาน…"
+        android:textSize="17sp"
+        android:textColor="#20291F"
+        android:textColorHint="#8820291F"
+        android:inputType="textCapSentences"
+        android:imeOptions="actionDone"
+        android:paddingBottom="10dp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="หมวดหมู่"
+        android:textSize="12sp"
+        android:textColor="#8820291F"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:id="@+id/tag_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="20dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end">
+
+        <TextView
+            android:id="@+id/btn_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ยกเลิก"
+            android:textSize="15sp"
+            android:textColor="#8820291F"
+            android:padding="10dp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/btn_add"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="+ เพิ่ม"
+            android:textSize="15sp"
+            android:textColor="#4F7A5B"
+            android:textStyle="bold"
+            android:padding="10dp" />
+
+    </LinearLayout>
+
+</LinearLayout>
