@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'backup.dart';
 import 'models.dart';
 
 class SettingsScreen extends StatefulWidget {
   final List<TaskItem> tasks;
   final String userName;
   final void Function(String name, bool clearedAll) onSave;
+  final void Function(List<TaskItem> tasks) onImport; // กู้คืน: แทนที่งานทั้งหมด
 
   const SettingsScreen({
     super.key,
     required this.tasks,
     required this.userName,
     required this.onSave,
+    required this.onImport,
   });
 
   @override
@@ -123,6 +127,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
               ],
+            ])),
+            const SizedBox(height: 20),
+
+            // ── Backup ─────────────────────────────────────────────────────
+            _sectionLabel('สำรองข้อมูล'),
+            _card(child: Column(children: [
+              _actionRow(
+                icon: Icons.copy_all_rounded,
+                label: 'คัดลอกข้อมูลสำรอง (วางเก็บไว้ในโน้ตได้)',
+                color: kCText,
+                done: false,
+                onTap: () async {
+                  await Clipboard.setData(ClipboardData(text: buildBackup(widget.tasks)));
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('คัดลอกงาน $_totalCnt รายการแล้ว')));
+                  }
+                },
+              ),
+              _divider(),
+              _actionRow(
+                icon: Icons.restore_rounded,
+                label: 'กู้คืนจากคลิปบอร์ด (แทนที่งานทั้งหมด)',
+                color: kCText,
+                done: false,
+                onTap: () async {
+                  final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
+                  final restored = parseBackup(text);
+                  if (!mounted) return;
+                  if (restored == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('ในคลิปบอร์ดไม่ใช่ข้อมูลสำรองของ MTB')));
+                    return;
+                  }
+                  final ok = await _confirm('กู้คืนข้อมูล?', 'งานปัจจุบัน $_totalCnt รายการจะถูกแทนที่ด้วย ${restored.length} รายการจากข้อมูลสำรอง');
+                  if (ok && mounted) {
+                    widget.onImport(restored);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
             ])),
             const SizedBox(height: 20),
 

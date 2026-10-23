@@ -66,11 +66,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     NotificationService.scheduleWeeklyReview();
     _loadSettings();
     NotificationService.onWeeklyTap = _openWeeklySummary;
+    NotificationService.onPlanTap = _openMorningPlan;
     _loadTasks().then((_) async {
       _tasksLoaded = true;
       // เปิดจากแจ้งเตือนรีวิวรายสัปดาห์ → ไปหน้าสรุปก่อน แทนแผนเช้า
-      if (await NotificationService.launchedFromWeekly()) {
+      final launch = await NotificationService.launchPayload();
+      if (launch == 'weekly') {
         _openWeeklySummary();
+      } else if (launch == 'plan') {
+        _openMorningPlan();
       } else {
         _maybeShowMorningPlan();
       }
@@ -111,6 +115,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(
       tasks: _tasks,
       userName: _userName,
+      onImport: (restored) {
+        _set(() {
+          _tasks
+            ..clear()
+            ..addAll(restored);
+        });
+        _migrateNotificationIds(); // ตั้งแจ้งเตือนใหม่ทั้งหมด + บันทึก
+        _updateWidget();
+      },
       onSave: (name, clearedAll) {
         setState(() {
           _userName   = name;
