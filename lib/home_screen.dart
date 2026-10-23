@@ -308,11 +308,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         }
       } else {
         t.doneAt = null;
+        t.actualMin = null;
         NotificationService.scheduleDeadline(t.id, t);
       }
     });
     _saveTasks();
     _updateWidget();
+    if (t.done && t.estimateMin != null) _askActualMinutes(t);
   }
 
   DateTime _nextDeadline(DateTime from, String recurrence) {

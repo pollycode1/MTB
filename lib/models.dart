@@ -55,6 +55,8 @@ class TaskItem {
   DateTime? plannedFor; // วันที่เลือกไว้ในแผนเช้า (เทียบเฉพาะวัน)
   bool isFrog;          // งานกบของวัน
   int postponeCount;    // จำนวนครั้งที่ถูกเลื่อน (ดู home_plan.dart / _pickDeadline)
+  int? estimateMin;     // เวลาที่คาดว่าจะใช้ (นาที)
+  int? actualMin;       // เวลาที่ใช้จริง ถามตอนกดเสร็จ ถ้ามี estimateMin
   final List<SubTask> subTasks;
   // รหัสประจำงาน — ใช้เป็น notification id และ key ของ UI แทนลำดับในลิสต์
   final int id;
@@ -89,6 +91,8 @@ class TaskItem {
     this.plannedFor,
     this.isFrog = false,
     this.postponeCount = 0,
+    this.estimateMin,
+    this.actualMin,
     List<SubTask>? subTasks,
   }) : id = id ?? _genId(),
        subTasks = subTasks ?? [];
@@ -115,6 +119,8 @@ class TaskItem {
     'plannedFor': plannedFor?.toIso8601String(),
     'isFrog': isFrog,
     'postponeCount': postponeCount,
+    'estimateMin': estimateMin,
+    'actualMin': actualMin,
     'subTasks': subTasks.map((s) => s.toJson()).toList(),
   };
 
@@ -140,6 +146,8 @@ class TaskItem {
     plannedFor: j['plannedFor'] != null ? DateTime.tryParse(j['plannedFor'] as String) : null,
     isFrog: j['isFrog'] as bool? ?? false,
     postponeCount: j['postponeCount'] as int? ?? 0,
+    estimateMin: (j['estimateMin'] as num?)?.toInt(),
+    actualMin: (j['actualMin'] as num?)?.toInt(),
     subTasks: (j['subTasks'] as List? ?? [])
         .map((s) => SubTask.fromJson(s as Map<String, dynamic>)).toList(),
   );

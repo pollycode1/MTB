@@ -12,6 +12,52 @@ extension _MorningPlan on _HomeScreenState {
     return p != null && p.year == n.year && p.month == n.month && p.day == n.day;
   }
 
+  // ถามเวลาที่ใช้จริงตอนกดเสร็จ (เฉพาะงานที่ตั้งเวลาประมาณไว้) ไว้เทียบในสรุปสัปดาห์
+  void _askActualMinutes(TaskItem t) {
+    const options = [10, 15, 30, 45, 60, 90, 120, 180];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1C1C1C),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('ใช้เวลาจริงเท่าไร?', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: _cText)),
+          const SizedBox(height: 4),
+          Text('${t.title} · คาดไว้ ${t.estimateMin} นาที', maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .5))),
+          const SizedBox(height: 14),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final m in options)
+              GestureDetector(
+                onTap: () {
+                  _set(() => t.actualMin = m);
+                  _saveTasks();
+                  Navigator.pop(ctx);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(color: _cSurf, borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _cText.withValues(alpha: .2))),
+                  child: Text('$m นาที', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _cText)),
+                ),
+              ),
+            GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Text('ข้าม', style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .45))),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   Future<void> _maybeShowMorningPlan() async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getString('last_plan_date') == _dayKey(DateTime.now())) return;

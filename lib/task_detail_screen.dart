@@ -118,6 +118,10 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           const SizedBox(height: 8),
           _priorityRow(),
           const SizedBox(height: 20),
+          _sectionLabel('เวลาที่คาดว่าจะใช้'),
+          const SizedBox(height: 8),
+          _estimateRow(),
+          const SizedBox(height: 20),
           _sectionLabel('กำหนดส่ง & การแจ้งเตือน'),
           const SizedBox(height: 10),
           _deadlineRow(),
@@ -214,6 +218,28 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         ),
       ));
     }));
+  }
+
+  Widget _estimateRow() {
+    const options = <int?>[null, 15, 30, 60, 90, 120];
+    return Wrap(spacing: 8, runSpacing: 6, children: options.map((m) {
+      final active = widget.task.estimateMin == m;
+      return GestureDetector(
+        onTap: () { setState(() => widget.task.estimateMin = m); _save(); },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? kCGreen : kCSurf,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: active ? kCGreen : kCText.withValues(alpha: .12)),
+          ),
+          child: Text(m == null ? 'ไม่ระบุ' : '$m นาที', style: TextStyle(
+            fontSize: 12.5, fontWeight: FontWeight.w600,
+            color: active ? Colors.white : kCText.withValues(alpha: .6))),
+        ),
+      );
+    }).toList());
   }
 
   Widget _deadlineRow() {

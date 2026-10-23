@@ -5,11 +5,13 @@ import 'models.dart';
 class WeekSummary {
   final DateTime weekStart;
   final int doneThis, doneLast, pending, overdue, inbox;
+  final int timedCount, estMin, actMin; // งานเสร็จสัปดาห์นี้ที่มีทั้งเวลาประมาณและเวลาจริง
   final Map<String, int> doneByArea;
   final List<TaskItem> mostPostponed;
   WeekSummary({
     required this.weekStart, required this.doneThis, required this.doneLast,
     required this.pending, required this.overdue, required this.inbox,
+    required this.timedCount, required this.estMin, required this.actMin,
     required this.doneByArea, required this.mostPostponed,
   });
 }
@@ -19,12 +21,17 @@ WeekSummary computeWeekSummary(List<TaskItem> tasks, DateTime now) {
   final start = today.subtract(Duration(days: now.weekday - 1));
   final lastStart = start.subtract(const Duration(days: 7));
   final byArea = <String, int>{};
-  var doneThis = 0, doneLast = 0;
+  var doneThis = 0, doneLast = 0, timedCount = 0, estMin = 0, actMin = 0;
   for (final t in tasks.where((t) => t.type == 'task' && t.done && t.doneAt != null)) {
     final d = t.doneAt!;
     if (!d.isBefore(start)) {
       doneThis++;
       byArea[t.area ?? 'อื่นๆ'] = (byArea[t.area ?? 'อื่นๆ'] ?? 0) + 1;
+      if (t.estimateMin != null && t.actualMin != null) {
+        timedCount++;
+        estMin += t.estimateMin!;
+        actMin += t.actualMin!;
+      }
     } else if (!d.isBefore(lastStart)) {
       doneLast++;
     }
@@ -39,6 +46,9 @@ WeekSummary computeWeekSummary(List<TaskItem> tasks, DateTime now) {
     pending: pending.length,
     overdue: pending.where((t) => t.deadline != null && t.deadline!.isBefore(now)).length,
     inbox: tasks.where((t) => t.type == 'inbox').length,
+    timedCount: timedCount,
+    estMin: estMin,
+    actMin: actMin,
     doneByArea: byArea,
     mostPostponed: stuck.take(3).toList(),
   );
@@ -108,6 +118,14 @@ class WeeklySummaryScreen extends StatelessWidget {
               Text('${e.value}', style: const TextStyle(fontFamily: kMono, fontSize: 14, color: kCGoldDark)),
             ]),
           )),
+        ],
+        if (s.timedCount > 0) ...[
+          _label('ประมาณเวลา vs ใช้จริง · ${s.timedCount} งาน'),
+          Text('คาดไว้ ${s.estMin} นาที · ใช้จริง ${s.actMin} นาที (${(s.actMin * 100 / s.estMin).round()}%)',
+            style: const TextStyle(fontSize: 14, color: kCText)),
+          const SizedBox(height: 4),
+          Text(s.actMin > s.estMin ? 'งานใช้เวลานานกว่าที่คาด — รอบหน้าลองประมาณเพิ่มขึ้น' : 'ประมาณเวลาได้ใกล้เคียงหรือเผื่อไว้พอดี',
+            style: TextStyle(fontSize: 12, color: kCText.withValues(alpha: .5))),
         ],
         _label('งานที่ถูกเลื่อนบ่อยสุด'),
         if (s.mostPostponed.isEmpty)
