@@ -57,18 +57,9 @@
             android:layout_weight="1"
             android:layout_height="match_parent"
             android:gravity="center"
-            android:text="วันนี้"
+            android:text="งาน"
             android:textSize="10sp"
             android:textColor="#E2E2E2" />
-        <TextView
-            android:id="@+id/tab_inbox"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:text="กล่องรับ"
-            android:textSize="10sp"
-            android:textColor="#555555" />
         <TextView
             android:id="@+id/tab_idea"
             android:layout_width="0dp"

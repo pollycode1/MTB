@@ -31,7 +31,6 @@ class MtbTasksWidget : AppWidgetProvider() {
 
         val TAB_IDS = mapOf(
             "task"    to R.id.tab_today,
-            "inbox"   to R.id.tab_inbox,
             "idea"    to R.id.tab_idea,
         )
     }
@@ -172,7 +171,7 @@ class MtbTasksWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
             val data  = HomeWidgetPlugin.getData(context)
-            val tab   = data.getString("widget_tab_$id", "task") ?: "task"
+            val tab   = data.getString("widget_tab_$id", "task").let { if (it == "inbox" || it == null) "task" else it }
             val views = RemoteViews(context.packageName, R.layout.mtb_widget_tasks)
 
             val dayFmt = SimpleDateFormat("EEE d MMM", Locale("th"))
@@ -267,7 +266,9 @@ class MtbTasksWidget : AppWidgetProvider() {
                 val pending = data.getInt("pending_tasks", 0)
                 val total   = data.getInt("total_tasks", 0)
                 val done    = total - pending
-                if (done > 0) "เสร็จ $done/$total" else "เหลือ $pending งาน"
+                val inbox   = countByType(data, "inbox")
+                val base    = if (done > 0) "เสร็จ $done/$total" else "เหลือ $pending งาน"
+                if (inbox > 0) "รอคัดแยก $inbox · $base" else base
             }
             "inbox"   -> "${countByType(data, "inbox")} รายการ"
             "idea"    -> "${countByType(data, "idea")} ไอเดีย"

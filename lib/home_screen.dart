@@ -36,7 +36,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   bool _entered = false;
-  bool _showAllPending = false;
+  String _period = 'today'; // ตัวกรองแท็บงาน: today | week | month | all
   int _tabIdx = 0;
   String _historyFilter = 'เดือนนี้';
   String _areaFilter = '';
@@ -204,7 +204,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   // active tasks (type=task, not done) — used for widget count
   List<int> get _pendingIdx => List.generate(_tasks.length, (i) => i)
-      .where((i) => _tasks[i].type == 'task' && !_tasks[i].done).toList();
+      .where((i) => _tasks[i].type == 'task' && !_tasks[i].done && _tasks[i].archivedAt == null).toList();
   List<int> get _doneIdx => List.generate(_tasks.length, (i) => i)
       .where((i) => _tasks[i].type == 'task' && _tasks[i].done)
       .toList()
@@ -368,8 +368,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (_tabIdx == 0)
             _todayContent()
-          else if (_tabIdx == 1)
-            _inboxContent()
           else if (_tabIdx == 2)
             _ideaContent()
           else if (_tabIdx == 3)
@@ -386,9 +384,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
-        _tabBtn(0, 'วันนี้'),
-        const SizedBox(width: 8),
-        _tabBtn(1, 'กล่องรับ', badge: _inboxIdx.length),
+        _tabBtn(0, 'งาน', badge: _inboxIdx.length),
         const SizedBox(width: 8),
         _tabBtn(2, 'ไอเดีย'),
         const SizedBox(width: 8),

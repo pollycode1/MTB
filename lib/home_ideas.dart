@@ -69,7 +69,7 @@ extension _IdeasTab on _HomeScreenState {
                 ),
               ),
               GestureDetector(
-                onTap: () { _set(() => _tasks[i].type = 'inbox'); _saveTasks(); _set(() => _tabIdx = 1); },
+                onTap: () { _set(() => _tasks[i].type = 'inbox'); _saveTasks(); _set(() => _tabIdx = 0); },
                 child: Text('→ inbox', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGoldDark)),
               ),
               const SizedBox(width: 10),

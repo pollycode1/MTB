@@ -1,26 +1,7 @@
 part of 'home_screen.dart';
 
 extension _InboxTab on _HomeScreenState {
-  // ── Inbox tab ──────────────────────────────────────────────────────────────────
-  Widget _inboxContent() {
-    final indices = _inboxIdx;
-    if (indices.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 60),
-        child: Center(child: Column(children: [
-          Text('inbox ว่างเปล่า', style: TextStyle(fontSize: 14, color: _cText.withValues(alpha: .4))),
-          const SizedBox(height: 4),
-          Text('กด + เพื่อจับความคิดใหม่', style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .28))),
-        ])),
-      );
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _sectionLabel('${indices.length} รายการรอคัดแยก'),
-      const SizedBox(height: 10),
-      ...indices.asMap().entries.map((e) => _staggered(e.key, _inboxCard(e.value))),
-    ]);
-  }
-
+  // ── Inbox cards (แสดงบนสุดของแท็บงาน) ───────────────────────────────────────────
   Widget _inboxCard(int i) {
     final t = _tasks[i];
     return Container(
@@ -109,6 +90,10 @@ extension _InboxTab on _HomeScreenState {
                 if (next.isEmpty) return;
                 _set(() {
                   _tasks[i].type = 'task';
+                  if (_tasks[i].deadline == null) {
+                    final n = DateTime.now();
+                    _tasks[i].plannedFor = DateTime(n.year, n.month, n.day);
+                  }
                   _tasks[i].nextAction = next;
                   _tasks[i].area = area;
                   _tasks[i].meta = next;
