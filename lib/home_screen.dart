@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'task_detail_screen.dart';
 import 'settings_screen.dart';
+import 'weekly_summary_screen.dart';
 import 'notification_service.dart';
 part 'home_today.dart';
 part 'home_inbox.dart';
@@ -63,9 +64,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     HomeWidget.setAppGroupId('group.com.example.mtb');
     NotificationService.scheduleWeeklyReview();
     _loadSettings();
-    _loadTasks().then((_) {
+    NotificationService.onWeeklyTap = _openWeeklySummary;
+    _loadTasks().then((_) async {
       _tasksLoaded = true;
-      _maybeShowMorningPlan();
+      // เปิดจากแจ้งเตือนรีวิวรายสัปดาห์ → ไปหน้าสรุปก่อน แทนแผนเช้า
+      if (await NotificationService.launchedFromWeekly()) {
+        _openWeeklySummary();
+      } else {
+        _maybeShowMorningPlan();
+      }
       Future.delayed(const Duration(milliseconds: 500), _updateWidget);
       if (_pendingIdeaTitle != null) {
         final t = _pendingIdeaTitle!;
@@ -87,6 +94,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _saveSettings(String name) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('settings_name', name);
+  }
+
+  void _openWeeklySummary() {
+    if (!mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => WeeklySummaryScreen(tasks: _tasks)));
   }
 
   void _openSettings() {
@@ -431,6 +443,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         Text('เหลือ $remaining งาน', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: _cText)),
       ]),
       Row(children: [
+        GestureDetector(
+          onTap: _openWeeklySummary,
+          child: Container(
+            width: 36, height: 36,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: _cText.withValues(alpha: .07),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(Icons.insights_outlined, size: 17, color: _cText.withValues(alpha: .55)),
+          ),
+        ),
         GestureDetector(
           onTap: _openSettings,
           child: Container(

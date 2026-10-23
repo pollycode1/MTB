@@ -6,15 +6,28 @@ import 'models.dart';
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
+  // HomeScreen ตั้งไว้ให้เปิดหน้าสรุปสัปดาห์เมื่อกดแจ้งเตือนรีวิว
+  static void Function()? onWeeklyTap;
 
   static Future<void> init() async {
     tz.initializeTimeZones();
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _plugin.initialize(const InitializationSettings(android: android));
+    await _plugin.initialize(
+      const InitializationSettings(android: android),
+      onDidReceiveNotificationResponse: (r) {
+        if (r.payload == 'weekly') onWeeklyTap?.call();
+      },
+    );
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
     _ready = true;
+  }
+
+  // แอพถูกเปิดจากการกดแจ้งเตือนรีวิวรายสัปดาห์ตอนปิดอยู่หรือไม่
+  static Future<bool> launchedFromWeekly() async {
+    final d = await _plugin.getNotificationAppLaunchDetails();
+    return d?.didNotificationLaunchApp == true && d?.notificationResponse?.payload == 'weekly';
   }
 
   // priority 1=สูง → แจ้ง 24h+1h ก่อน, 2=กลาง → 3h ก่อน, 3=ต่ำ → 1h ก่อน
@@ -81,7 +94,7 @@ class NotificationService {
     await _plugin.zonedSchedule(
       9999,
       'Weekly Review',
-      'เปิด inbox + idea bucket มาเคลียร์กัน',
+      'ดูสรุปสัปดาห์ + เคลียร์กล่องรับ',
       tz.TZDateTime.from(next, tz.local),
       const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -94,6 +107,7 @@ class NotificationService {
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      payload: 'weekly',
     );
   }
 }
