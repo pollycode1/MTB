@@ -54,6 +54,7 @@ class TaskItem {
   DateTime? archivedAt;
   DateTime? plannedFor; // วันที่เลือกไว้ในแผนเช้า (เทียบเฉพาะวัน)
   bool isFrog;          // งานกบของวัน
+  int postponeCount;    // จำนวนครั้งที่ถูกเลื่อน (ดู home_plan.dart / _pickDeadline)
   final List<SubTask> subTasks;
   // รหัสประจำงาน — ใช้เป็น notification id และ key ของ UI แทนลำดับในลิสต์
   final int id;
@@ -87,6 +88,7 @@ class TaskItem {
     this.archivedAt,
     this.plannedFor,
     this.isFrog = false,
+    this.postponeCount = 0,
     List<SubTask>? subTasks,
   }) : id = id ?? _genId(),
        subTasks = subTasks ?? [];
@@ -112,6 +114,7 @@ class TaskItem {
     'archivedAt': archivedAt?.toIso8601String(),
     'plannedFor': plannedFor?.toIso8601String(),
     'isFrog': isFrog,
+    'postponeCount': postponeCount,
     'subTasks': subTasks.map((s) => s.toJson()).toList(),
   };
 
@@ -136,6 +139,7 @@ class TaskItem {
     archivedAt: j['archivedAt'] != null ? DateTime.tryParse(j['archivedAt'] as String) : null,
     plannedFor: j['plannedFor'] != null ? DateTime.tryParse(j['plannedFor'] as String) : null,
     isFrog: j['isFrog'] as bool? ?? false,
+    postponeCount: j['postponeCount'] as int? ?? 0,
     subTasks: (j['subTasks'] as List? ?? [])
         .map((s) => SubTask.fromJson(s as Map<String, dynamic>)).toList(),
   );

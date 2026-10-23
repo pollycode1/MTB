@@ -75,11 +75,14 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       context: context,
       initialTime: TimeOfDay.fromDateTime(widget.task.deadline ?? DateTime(now.year, now.month, now.day, 9)),
     );
+    final old = widget.task.deadline;
+    final next = DateTime(
+      picked.year, picked.month, picked.day,
+      time?.hour ?? 9, time?.minute ?? 0,
+    );
     setState(() {
-      widget.task.deadline = DateTime(
-        picked.year, picked.month, picked.day,
-        time?.hour ?? 9, time?.minute ?? 0,
-      );
+      if (old != null && next.isAfter(old)) widget.task.postponeCount++; // เลื่อนกำหนด = เลื่อน 1 ครั้ง
+      widget.task.deadline = next;
     });
     NotificationService.cancel(widget.task.id);
     NotificationService.scheduleDeadline(widget.task.id, widget.task);
