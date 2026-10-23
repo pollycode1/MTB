@@ -1,57 +1,107 @@
 part of 'home_screen.dart';
 
 extension _TodayTab on _HomeScreenState {
-  // ── Today tab ──────────────────────────────────────────────────────────────────
+  // ── งาน tab: กล่องรับ (รอคัดแยก) + งานตามช่วงเวลา ──────────────────────────────
+  // วันที่ที่งานควรทำ = plannedFor ?? deadline (ไม่มีทั้งคู่ = งานค้างเก่า เห็นเฉพาะ "ทั้งหมด")
+  DateTime? _dueDay(TaskItem t) {
+    final d = t.plannedFor ?? t.deadline;
+    return d == null ? null : DateTime(d.year, d.month, d.day);
+  }
+
+  bool _inPeriod(TaskItem t) {
+    if (_period == 'all') return true;
+    final d = _dueDay(t);
+    if (d == null) return false;
+    final n = DateTime.now();
+    final today = DateTime(n.year, n.month, n.day);
+    final DateTime end = switch (_period) {
+      'week'  => today.add(Duration(days: 7 - n.weekday)),       // อาทิตย์นี้
+      'month' => DateTime(n.year, n.month + 1, 0),               // วันสุดท้ายของเดือน
+      _       => today,
+    };
+    return !d.isAfter(end); // รวมงานที่เลยมาแล้ว (ยังไม่เสร็จ) ไว้ด้วย
+  }
+
+  bool _isDue(TaskItem t) {
+    final d = _dueDay(t);
+    final n = DateTime.now();
+    return d != null && !d.isAfter(DateTime(n.year, n.month, n.day));
+  }
+
+  Widget _periodRow() {
+    const keys   = ['today', 'week', 'month', 'all'];
+    const labels = ['วันนี้', 'สัปดาห์นี้', 'เดือนนี้', 'ทั้งหมด'];
+    return Row(children: List.generate(keys.length, (i) {
+      final active = _period == keys[i];
+      return Padding(
+        padding: EdgeInsets.only(right: i < keys.length - 1 ? 8 : 0),
+        child: GestureDetector(
+          onTap: () => _set(() => _period = keys[i]),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: active ? _cGold.withValues(alpha: .15) : _cText.withValues(alpha: .06),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: active ? _cGoldDark.withValues(alpha: .45) : _cText.withValues(alpha: .08)),
+            ),
+            child: Text(labels[i], style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+              color: active ? _cText : _cText.withValues(alpha: .5))),
+          ),
+        ),
+      );
+    }));
+  }
+
   Widget _todayContent() {
-    var pending = _pendingIdx;
+    var pending = _pendingIdx.where((i) => _inPeriod(_tasks[i])).toList();
     var done    = _doneIdx;
     if (_areaFilter.isNotEmpty) {
       pending = pending.where((i) => _tasks[i].area == _areaFilter).toList();
       done    = done.where((i) => _tasks[i].area == _areaFilter).toList();
     }
+    // กบก่อน → วางแผนไว้วันนี้ → ลำดับอัตโนมัติ
     pending = _rankForFocus(pending);
-    // มีแผนเช้าของวันนี้ → โฟกัสตามแผน (กบก่อน) ไม่มี → 5 งานแรกตามลำดับอัตโนมัติ
-    final planned = pending.where((i) => _isPlannedToday(_tasks[i])).toList()
-      ..sort((a, b) => (_tasks[b].isFrog ? 1 : 0) - (_tasks[a].isFrog ? 1 : 0));
-    final focus = planned.isNotEmpty ? planned : pending.take(5).toList();
-    final rest  = pending.where((i) => !focus.contains(i)).toList();
+    int pri(int i) => _tasks[i].isFrog ? 0 : _isPlannedToday(_tasks[i]) ? 1 : 2;
+    pending.sort((a, b) => pri(a).compareTo(pri(b))); // sort เสถียร: ลำดับเดิมคงไว้ในกลุ่มเดียวกัน
+    final inbox = _inboxIdx;
+    const periodLabel = {'today': 'วันนี้', 'week': 'สัปดาห์นี้', 'month': 'เดือนนี้', 'all': 'ทั้งหมด'};
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (inbox.isNotEmpty) ...[
+        _sectionLabel('รอคัดแยก · ${inbox.length} รายการ'),
+        const SizedBox(height: 10),
+        ...inbox.asMap().entries.map((e) => _staggered(e.key, _inboxCard(e.value))),
+        const SizedBox(height: 10),
+      ],
+      _periodRow(),
+      const SizedBox(height: 10),
       _areaFilterRow(),
       const SizedBox(height: 12),
-      if (pending.isEmpty && done.isEmpty)
+      if (pending.isEmpty && done.isEmpty && inbox.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 40),
           child: Center(child: Text('ยังไม่มีงาน กด + เพื่อเพิ่ม',
             style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .4)))),
         )
       else ...[
-        if (focus.isNotEmpty) ...[
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _sectionLabel('โฟกัสวันนี้ · ${focus.length} งาน'),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _openMorningPlan,
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                child: Text('วางแผน', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGoldDark)),
-              ),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          ...focus.asMap().entries.map((e) => _staggered(e.key, _taskCard(e.value, done: false))),
-        ],
-        if (rest.isNotEmpty) ...[
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _sectionLabel('${periodLabel[_period]} · ${pending.length} งาน'),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => _set(() => _showAllPending = !_showAllPending),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(_showAllPending ? 'ซ่อนงานที่เหลือ ▴' : 'งานที่เหลือ · ${rest.length} งาน ▾',
-                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGoldDark)),
+            onTap: _openMorningPlan,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+              child: Text('วางแผน', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGoldDark)),
             ),
           ),
-          if (_showAllPending) ...rest.map((i) => _taskCard(i, done: false)),
-        ],
+        ]),
+        const SizedBox(height: 10),
+        if (pending.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text('ไม่มีงานในช่วงนี้', style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .4))),
+          ),
+        ...pending.asMap().entries.map((e) => _staggered(e.key, _taskCard(e.value, done: false))),
         if (done.isNotEmpty) ...[
           const SizedBox(height: 6),
           _sectionLabel('เสร็จแล้ว · ${done.length} งาน'),
@@ -88,7 +138,6 @@ extension _TodayTab on _HomeScreenState {
     ]);
   }
 
-  // เรียงงานค้างตามความเร่งด่วน: เกินกำหนด → วันนี้ → ภายใน 2 วัน → ตามความสำคัญ
   List<int> _rankForFocus(List<int> idxs) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -221,6 +270,10 @@ extension _TodayTab on _HomeScreenState {
                     const SizedBox(height: 5),
                     _deadlineBadge(t.deadline!),
                   ],
+                  if (!done && _isDue(t)) ...[
+                    const SizedBox(height: 7),
+                    _dueActions(t),
+                  ],
                   if (t.subTasks.isNotEmpty && !_expandedCards.contains(t.id)) ...[
                     const SizedBox(height: 5),
                     _subTaskProgress(t.subTasks),
@@ -270,6 +323,28 @@ extension _TodayTab on _HomeScreenState {
         ]),
       ),
     );
+  }
+
+  // งานถึงวันทำแล้ว: ป้าย "วันนี้" + เลื่อน / ไม่ทำ
+  Widget _dueActions(TaskItem t) {
+    Widget btn(String label, Color fg, VoidCallback onTap) => GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 14, top: 2, bottom: 2),
+        child: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: fg)),
+      ),
+    );
+    return Row(children: [
+      Container(
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(color: _cGreen.withValues(alpha: .15), borderRadius: BorderRadius.circular(999)),
+        child: const Text('วันนี้', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _cGreenDark)),
+      ),
+      btn('เลื่อน', _cGoldDark, () => _openDefer(t)),
+      btn('ไม่ทำ', _cText.withValues(alpha: .45), () => _archiveTask(t)),
+    ]);
   }
 
   Widget _deadlineBadge(DateTime d) {

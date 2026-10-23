@@ -23,7 +23,7 @@ class TasksRemoteViewsFactory(
     private val widgetId: Int,
 ) : RemoteViewsService.RemoteViewsFactory {
 
-    private data class Row(val title: String, val done: Boolean, val idx: Int, val isTask: Boolean)
+    private data class Row(val title: String, val done: Boolean, val idx: Int, val kind: String, val doneAt: String = "") // kind: inbox | idea | task
     private var rows = listOf<Row>()
     private var currentTab = "task"
 
@@ -33,11 +33,11 @@ class TasksRemoteViewsFactory(
 
     private fun reload() {
         val hw = HomeWidgetPlugin.getData(ctx)
-        currentTab = hw.getString("widget_tab_$widgetId", "task") ?: "task"
+        currentTab = hw.getString("widget_tab_$widgetId", "task").let { if (it == "inbox" || it == null) "task" else it }
         loadTasksByType(hw, currentTab)
     }
 
-    private fun loadTasksByType(hw: android.content.SharedPreferences, type: String) {
+    private fun loadTasksByType(hw: android.content.SharedPreferences, tab: String) {
         var raw = hw.getString("tasks_json", null)
         if (raw == null) {
             raw = ctx.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -46,22 +46,29 @@ class TasksRemoteViewsFactory(
         if (raw == null) { rows = emptyList(); return }
         try {
             val list    = JSONArray(raw)
+            val inbox   = mutableListOf<Row>()
             val pending = mutableListOf<Row>()
             val done    = mutableListOf<Row>()
             for (i in 0 until list.length()) {
                 val t = list.getJSONObject(i)
-                if (t.optString("type", "task") != type) continue
                 if (!t.isNull("archivedAt")) continue
+                val type = t.optString("type", "task")
+                val title = t.optString("title", "")
                 val isDone = t.optBoolean("done", false)
-                val row = Row(t.optString("title", ""), isDone, i, type == "task")
-                if (isDone) done.add(row) else pending.add(row)
+                when {
+                    tab == "idea" && type == "idea" -> pending.add(Row(title, isDone, i, "idea"))
+                    tab == "task" && type == "inbox" -> inbox.add(Row(title, false, i, "inbox"))
+                    tab == "task" && type == "task" ->
+                        if (isDone) done.add(Row(title, true, i, "task", t.optString("doneAt", ""))) else pending.add(Row(title, false, i, "task"))
+                }
             }
-            rows = pending + done
+            // งานที่เสร็จล่าสุดอยู่บนสุดของกลุ่มเสร็จแล้ว (doneAt เป็น ISO จึงเทียบเป็นข้อความได้)
+            rows = inbox + pending + done.sortedByDescending { it.doneAt }
         } catch (_: Exception) { rows = emptyList() }
     }
 
     override fun getCount()          = rows.size
-    override fun getViewTypeCount()  = 1
+    override fun getViewTypeCount()  = 3
     override fun getItemId(pos: Int) = pos.toLong()
     override fun hasStableIds()      = false
     override fun getLoadingView()    = null
@@ -72,7 +79,7 @@ class TasksRemoteViewsFactory(
 
         return when {
             // ── Inbox: ชื่อ + [→งาน] [→ไอเดีย] [ลบ✕] ──────────────────────────
-            currentTab == "inbox" -> {
+            row.kind == "inbox" -> {
                 val rv = RemoteViews(ctx.packageName, R.layout.widget_inbox_item)
                 rv.setTextViewText(R.id.task_title, row.title)
                 rv.setOnClickFillInIntent(R.id.inbox_btn_task, Intent().apply {
@@ -96,7 +103,7 @@ class TasksRemoteViewsFactory(
 
             // ── Idea: 💡 ชื่อ (กดเปิดแอพ) + [✕] ──────────────────────────────
             // Template เป็น Activity → fill-in ใส่ data URI
-            currentTab == "idea" -> {
+            row.kind == "idea" -> {
                 val rv = RemoteViews(ctx.packageName, R.layout.widget_idea_item)
                 rv.setTextViewText(R.id.task_title, row.title)
                 val openUri = Uri.Builder().scheme("mtb").authority("idea")
@@ -124,9 +131,16 @@ class TasksRemoteViewsFactory(
                     rv.setTextColor(R.id.task_title, Color.parseColor("#E2E2E2"))
                     rv.setImageViewResource(R.id.task_check, R.drawable.widget_checkbox_pending)
                 }
-                rv.setOnClickFillInIntent(R.id.task_row, Intent().apply {
+                // ติ๊กได้เฉพาะช่องสี่เหลี่ยม · แตะชื่อ/แถว = เปิดหน้ารายละเอียดงานในแอพ
+                rv.setOnClickFillInIntent(R.id.task_check, Intent().apply {
                     putExtra(MtbTasksWidget.EXTRA_IDX, row.idx)
                 })
+                val openFill = Intent().apply {
+                    putExtra(MtbTasksWidget.EXTRA_ACTION, "open")
+                    putExtra(MtbTasksWidget.EXTRA_TITLE, row.title)
+                }
+                rv.setOnClickFillInIntent(R.id.task_row, openFill)
+                rv.setOnClickFillInIntent(R.id.task_title, openFill)
                 rv
             }
         }

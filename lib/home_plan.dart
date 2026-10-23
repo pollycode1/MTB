@@ -12,6 +12,90 @@ extension _MorningPlan on _HomeScreenState {
     return p != null && p.year == n.year && p.month == n.month && p.day == n.day;
   }
 
+  // ไม่ทำ = เก็บถาวร (กู้คืนได้จากแท็บเก็บถาวร)
+  void _archiveTask(TaskItem t) {
+    NotificationService.cancel(t.id);
+    _set(() { t.archivedAt = DateTime.now(); t.isFrog = false; });
+    _saveTasks();
+    _updateWidget();
+  }
+
+  // เลื่อนงานไปวันอื่น: เลือกกี่วันจากวันนี้ หรือระบุวันที่ในปฏิทิน นับเป็นการเลื่อน 1 ครั้ง
+  void _deferTo(TaskItem t, DateTime day) {
+    _set(() {
+      t.plannedFor = DateTime(day.year, day.month, day.day);
+      t.isFrog = false;
+      t.postponeCount++;
+      t.lastUpdatedAt = DateTime.now();
+    });
+    _saveTasks();
+    _updateWidget();
+  }
+
+  void _openDefer(TaskItem t) {
+    final n = DateTime.now();
+    final today = DateTime(n.year, n.month, n.day);
+    const days = [1, 2, 3, 5, 7];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1C1C1C),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('เลื่อนไปอีกกี่วัน?', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: _cText)),
+          const SizedBox(height: 4),
+          Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .5))),
+          const SizedBox(height: 14),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final d in days)
+              GestureDetector(
+                onTap: () { Navigator.pop(ctx); _deferTo(t, today.add(Duration(days: d))); },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(color: _cSurf, borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _cText.withValues(alpha: .2))),
+                  child: Text(d == 1 ? 'พรุ่งนี้' : '$d วัน', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _cText)),
+                ),
+              ),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: ctx,
+                  initialDate: today.add(const Duration(days: 1)),
+                  firstDate: today.add(const Duration(days: 1)),
+                  lastDate: today.add(const Duration(days: 365 * 2)),
+                  builder: (c, child) => Theme(
+                    data: Theme.of(c).copyWith(colorScheme: const ColorScheme.dark(
+                      primary: kCGreen, onPrimary: Colors.white, surface: kCSurf, onSurface: kCText)),
+                    child: child!,
+                  ),
+                );
+                if (picked == null) return;
+                if (ctx.mounted) Navigator.pop(ctx);
+                _deferTo(t, picked);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(color: _cGreen.withValues(alpha: .15), borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _cGreen.withValues(alpha: .4))),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.calendar_month_rounded, size: 15, color: _cGreenDark),
+                  SizedBox(width: 6),
+                  Text('เลือกวันที่…', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _cGreenDark)),
+                ]),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   // ถามเวลาที่ใช้จริงตอนกดเสร็จ (เฉพาะงานที่ตั้งเวลาประมาณไว้) ไว้เทียบในสรุปสัปดาห์
   void _askActualMinutes(TaskItem t) {
     const options = [10, 15, 30, 45, 60, 90, 120, 180];

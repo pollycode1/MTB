@@ -31,7 +31,6 @@ class MtbTasksWidget : AppWidgetProvider() {
 
         val TAB_IDS = mapOf(
             "task"    to R.id.tab_today,
-            "inbox"   to R.id.tab_inbox,
             "idea"    to R.id.tab_idea,
         )
     }
@@ -39,8 +38,13 @@ class MtbTasksWidget : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_TOGGLE -> {
-                val idx = intent.getIntExtra(EXTRA_IDX, -1)
-                if (idx >= 0) toggleTask(context, idx)
+                val idx    = intent.getIntExtra(EXTRA_IDX, -1)
+                val action = intent.getStringExtra(EXTRA_ACTION)
+                when (action) {
+                    null -> if (idx >= 0) toggleTask(context, idx)            // ติ๊กช่องสี่เหลี่ยม
+                    "open" -> openTaskInApp(context, intent.getStringExtra(EXTRA_TITLE))
+                    else -> if (idx >= 0) handleItemAction(context, idx, action) // ปุ่มของรายการรอคัดแยก
+                }
             }
             ACTION_SWITCH_TAB -> {
                 val tab      = intent.getStringExtra(EXTRA_TAB) ?: "task"
@@ -84,6 +88,21 @@ class MtbTasksWidget : AppWidgetProvider() {
             }
         }
         super.onReceive(context, intent)
+    }
+
+    // เปิดหน้ารายละเอียดงานในแอพ: mtb://task?t=ชื่อ (ใช้ launch action ของ home_widget ให้ widgetClicked ทำงาน)
+    private fun openTaskInApp(context: Context, title: String?) {
+        if (title.isNullOrEmpty()) return
+        val uri = Uri.Builder().scheme("mtb").authority("task").appendQueryParameter("t", title).build()
+        PendingIntent.getActivity(
+            context, 9600 + title.hashCode(),
+            Intent(context, MainActivity::class.java).apply {
+                action = "es.antonborri.home_widget.action.LAUNCH"
+                data   = uri
+                flags  = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        ).send()
     }
 
     // ── Item actions (inbox convert / delete) ─────────────────────────────────
@@ -172,7 +191,7 @@ class MtbTasksWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
             val data  = HomeWidgetPlugin.getData(context)
-            val tab   = data.getString("widget_tab_$id", "task") ?: "task"
+            val tab   = data.getString("widget_tab_$id", "task").let { if (it == "inbox" || it == null) "task" else it }
             val views = RemoteViews(context.packageName, R.layout.mtb_widget_tasks)
 
             val dayFmt = SimpleDateFormat("EEE d MMM", Locale("th"))
@@ -267,7 +286,9 @@ class MtbTasksWidget : AppWidgetProvider() {
                 val pending = data.getInt("pending_tasks", 0)
                 val total   = data.getInt("total_tasks", 0)
                 val done    = total - pending
-                if (done > 0) "เสร็จ $done/$total" else "เหลือ $pending งาน"
+                val inbox   = countByType(data, "inbox")
+                val base    = if (done > 0) "เสร็จ $done/$total" else "เหลือ $pending งาน"
+                if (inbox > 0) "รอคัดแยก $inbox · $base" else base
             }
             "inbox"   -> "${countByType(data, "inbox")} รายการ"
             "idea"    -> "${countByType(data, "idea")} ไอเดีย"
