@@ -12,8 +12,8 @@
 
     <ImageView
         android:id="@+id/task_check"
-        android:layout_width="18dp"
-        android:layout_height="18dp"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
         android:src="@drawable/widget_checkbox_pending"
         android:scaleType="fitXY" />
 
@@ -22,7 +22,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:layout_marginStart="10dp"
+        android:layout_marginStart="14dp"
         android:textColor="#E2E2E2"
         android:textSize="18sp"
         android:maxLines="1"

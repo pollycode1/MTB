@@ -23,7 +23,7 @@ class TasksRemoteViewsFactory(
     private val widgetId: Int,
 ) : RemoteViewsService.RemoteViewsFactory {
 
-    private data class Row(val title: String, val done: Boolean, val idx: Int, val kind: String) // inbox | idea | task
+    private data class Row(val title: String, val done: Boolean, val idx: Int, val kind: String, val doneAt: String = "") // kind: inbox | idea | task
     private var rows = listOf<Row>()
     private var currentTab = "task"
 
@@ -59,10 +59,11 @@ class TasksRemoteViewsFactory(
                     tab == "idea" && type == "idea" -> pending.add(Row(title, isDone, i, "idea"))
                     tab == "task" && type == "inbox" -> inbox.add(Row(title, false, i, "inbox"))
                     tab == "task" && type == "task" ->
-                        if (isDone) done.add(Row(title, true, i, "task")) else pending.add(Row(title, false, i, "task"))
+                        if (isDone) done.add(Row(title, true, i, "task", t.optString("doneAt", ""))) else pending.add(Row(title, false, i, "task"))
                 }
             }
-            rows = inbox + pending + done
+            // งานที่เสร็จล่าสุดอยู่บนสุดของกลุ่มเสร็จแล้ว (doneAt เป็น ISO จึงเทียบเป็นข้อความได้)
+            rows = inbox + pending + done.sortedByDescending { it.doneAt }
         } catch (_: Exception) { rows = emptyList() }
     }
 
@@ -130,9 +131,16 @@ class TasksRemoteViewsFactory(
                     rv.setTextColor(R.id.task_title, Color.parseColor("#E2E2E2"))
                     rv.setImageViewResource(R.id.task_check, R.drawable.widget_checkbox_pending)
                 }
-                rv.setOnClickFillInIntent(R.id.task_row, Intent().apply {
+                // ติ๊กได้เฉพาะช่องสี่เหลี่ยม · แตะชื่อ/แถว = เปิดหน้ารายละเอียดงานในแอพ
+                rv.setOnClickFillInIntent(R.id.task_check, Intent().apply {
                     putExtra(MtbTasksWidget.EXTRA_IDX, row.idx)
                 })
+                val openFill = Intent().apply {
+                    putExtra(MtbTasksWidget.EXTRA_ACTION, "open")
+                    putExtra(MtbTasksWidget.EXTRA_TITLE, row.title)
+                }
+                rv.setOnClickFillInIntent(R.id.task_row, openFill)
+                rv.setOnClickFillInIntent(R.id.task_title, openFill)
                 rv
             }
         }

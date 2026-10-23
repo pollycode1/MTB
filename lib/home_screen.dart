@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   String _historyFilter = 'เดือนนี้';
   String _areaFilter = '';
   String? _pendingIdeaTitle;
+  String? _pendingTaskTitle;
   bool _tasksLoaded = false;
 
   final Set<int> _expandedCards = {};
@@ -74,6 +75,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _maybeShowMorningPlan();
       }
       Future.delayed(const Duration(milliseconds: 500), _updateWidget);
+      if (_pendingTaskTitle != null) {
+        final t = _pendingTaskTitle!;
+        _pendingTaskTitle = null;
+        _openIdeaByTitle(t, type: 'task');
+      }
       if (_pendingIdeaTitle != null) {
         final t = _pendingIdeaTitle!;
         _pendingIdeaTitle = null;
@@ -218,13 +224,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   List<int> get _escalatedWaitingIdx => List.generate(_tasks.length, (i) => i)
       .where((i) => _tasks[i].type == 'waiting' && _tasks[i].tag == 'ติดตาม' && !_tasks[i].done && _tasks[i].archivedAt == null).toList();
 
-  void _openIdeaByTitle(String title) {
+  void _openIdeaByTitle(String title, {String type = 'idea'}) {
     // ponytail: search after delay so _loadTasks() from didChangeAppLifecycleState can finish first
     Future.delayed(const Duration(milliseconds: 400), () {
       if (!mounted) return;
-      final idx = _tasks.indexWhere((t) => t.type == 'idea' && t.title == title);
+      final idx = _tasks.indexWhere((t) => t.type == type && t.title == title);
       if (idx < 0) return;
-      setState(() => _tabIdx = 2);
+      setState(() => _tabIdx = type == 'idea' ? 2 : 0);
       Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
         task: _tasks[idx],
         taskIndex: idx,
@@ -249,6 +255,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         if (idx != null && idx < _tasks.length) _toggle(idx);
       case 'task':
         setState(() => _tabIdx = 0);
+        final taskTitle = uri.queryParameters['t'];
+        if (taskTitle != null && taskTitle.isNotEmpty) {
+          if (_tasksLoaded) {
+            _openIdeaByTitle(taskTitle, type: 'task');
+          } else {
+            _pendingTaskTitle = taskTitle;
+          }
+        }
       case 'idea':
         setState(() => _tabIdx = 2);
         final title = uri.queryParameters['t'];

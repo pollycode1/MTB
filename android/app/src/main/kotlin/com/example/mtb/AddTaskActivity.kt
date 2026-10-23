@@ -183,10 +183,15 @@ class AddTaskActivity : Activity() {
         val raw   = flutterPrefs.getString("flutter.tasks_json", "[]") ?: "[]"
         try {
             val list = JSONArray(raw)
+            // เพิ่มจาก widget = งานของวันนี้โดยตรง ไม่ผ่านกล่องรับ (plannedFor = วันนี้ 00:00 เวลาท้องถิ่น)
+            val cal = java.util.Calendar.getInstance()
+            val today = String.format("%04d-%02d-%02dT00:00:00",
+                cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
             list.put(JSONObject().apply {
-                put("title", title); put("meta", "inbox")
+                put("title", title); put("meta", "")
                 put("done", false);  put("warn", false)
-                put("type", "inbox")
+                put("type", "task")
+                put("plannedFor", today)
                 put("doneAt", JSONObject.NULL)
                 put("tag", JSONObject.NULL); put("tagBg", JSONObject.NULL); put("tagColor", JSONObject.NULL)
             })
