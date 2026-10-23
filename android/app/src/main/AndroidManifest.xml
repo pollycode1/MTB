@@ -34,15 +34,6 @@
                 <data android:scheme="mtb"/>
             </intent-filter>
         </activity>
-        <!-- Budget widget (2x2) -->
-        <receiver android:name=".MtbBudgetWidget" android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/mtb_widget_budget_info" />
-        </receiver>
-
         <!-- Tasks widget (4x2) -->
         <receiver android:name=".MtbTasksWidget" android:exported="true">
             <intent-filter>

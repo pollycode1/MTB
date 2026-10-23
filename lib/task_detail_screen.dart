@@ -22,21 +22,18 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   late final TextEditingController _titleCtrl;
   late final TextEditingController _metaCtrl;
   late final TextEditingController _tagCtrl;
-  late final TextEditingController _budgetCtrl;
 
   @override
   void initState() {
     super.initState();
-    _titleCtrl  = TextEditingController(text: widget.task.title);
-    _metaCtrl   = TextEditingController(text: widget.task.meta);
-    _tagCtrl    = TextEditingController(text: widget.task.tag ?? '');
-    _budgetCtrl = TextEditingController(text: widget.task.budget?.toString() ?? '');
+    _titleCtrl = TextEditingController(text: widget.task.title);
+    _metaCtrl  = TextEditingController(text: widget.task.meta);
+    _tagCtrl   = TextEditingController(text: widget.task.tag ?? '');
   }
 
   @override
   void dispose() {
-    _titleCtrl.dispose(); _metaCtrl.dispose();
-    _tagCtrl.dispose(); _budgetCtrl.dispose();
+    _titleCtrl.dispose(); _metaCtrl.dispose(); _tagCtrl.dispose();
     super.dispose();
   }
 
@@ -48,9 +45,9 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     t.tag      = tag.isEmpty ? null : tag;
     t.tagBg    = tag.isEmpty ? null : const Color(0x33D8A93F);
     t.tagColor = tag.isEmpty ? null : kCGoldDark;
-    t.budget   = int.tryParse(_budgetCtrl.text.trim());
-    NotificationService.cancel(widget.taskIndex);
-    NotificationService.scheduleDeadline(widget.taskIndex, t);
+    t.lastUpdatedAt = DateTime.now();
+    NotificationService.cancel(widget.task.id);
+    NotificationService.scheduleDeadline(widget.task.id, t);
     widget.onChanged?.call();
     setState(() {});
   }
@@ -64,7 +61,10 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       lastDate: now.add(const Duration(days: 365 * 5)),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: ColorScheme.light(primary: kCGreen, onSurface: kCText),
+          colorScheme: const ColorScheme.dark(
+            primary: kCGreen, onPrimary: Colors.white,
+            surface: kCSurf, onSurface: kCText,
+          ),
         ),
         child: child!,
       ),
@@ -81,14 +81,14 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         time?.hour ?? 9, time?.minute ?? 0,
       );
     });
-    NotificationService.cancel(widget.taskIndex);
-    NotificationService.scheduleDeadline(widget.taskIndex, widget.task);
+    NotificationService.cancel(widget.task.id);
+    NotificationService.scheduleDeadline(widget.task.id, widget.task);
     widget.onChanged?.call();
   }
 
   void _clearDeadline() {
     setState(() => widget.task.deadline = null);
-    NotificationService.cancel(widget.taskIndex);
+    NotificationService.cancel(widget.task.id);
     widget.onChanged?.call();
   }
 
@@ -109,11 +109,11 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           const SizedBox(height: 12),
           _field('หมายเหตุ / กำหนดส่ง', _metaCtrl, onDone: _save),
           const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: _field('แท็ก', _tagCtrl, hint: 'เช่น สอน, ส่วนตัว', onDone: _save)),
-            const SizedBox(width: 10),
-            Expanded(child: _field('งบ (฿)', _budgetCtrl, hint: '500', keyboardType: TextInputType.number, onDone: _save)),
-          ]),
+          _field('แท็ก', _tagCtrl, hint: 'เช่น สอน, ส่วนตัว', onDone: _save),
+          const SizedBox(height: 16),
+          _sectionLabel('ความสำคัญ'),
+          const SizedBox(height: 8),
+          _priorityRow(),
           const SizedBox(height: 20),
           _sectionLabel('กำหนดส่ง & การแจ้งเตือน'),
           const SizedBox(height: 10),
@@ -123,7 +123,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           const SizedBox(height: 28),
           _sectionLabel('ขั้นตอนย่อย'),
           const SizedBox(height: 10),
-          ...t.subTasks.map((s) => _SubTaskTile(
+          ...t.subTasks.map((s) => SubTaskTile(
             sub: s, depth: 0,
             onChanged: () => setState(() {}),
             onDelete: () => setState(() => t.subTasks.remove(s)),
@@ -186,6 +186,31 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         ),
       ),
     ]);
+  }
+
+  Widget _priorityRow() {
+    const labels = ['สูง', 'กลาง', 'ต่ำ'];
+    const colors = [kCRed, kCGoldDark, kCGreen];
+    return Row(children: List.generate(3, (idx) {
+      final p = idx + 1;
+      final active = widget.task.priority == p;
+      return Expanded(child: GestureDetector(
+        onTap: () { setState(() => widget.task.priority = p); _save(); },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: EdgeInsets.only(right: idx < 2 ? 8 : 0),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? colors[idx].withValues(alpha: .15) : kCSurf,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: active ? colors[idx].withValues(alpha: .6) : kCText.withValues(alpha: .1)),
+          ),
+          child: Center(child: Text(labels[idx], style: TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w600,
+            color: active ? colors[idx] : kCText.withValues(alpha: .4)))),
+        ),
+      ));
+    }));
   }
 
   Widget _deadlineRow() {
@@ -284,17 +309,17 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
 }
 
 // ── Recursive sub-task tile ───────────────────────────────────────────────────
-class _SubTaskTile extends StatefulWidget {
+class SubTaskTile extends StatefulWidget {
   final SubTask sub;
   final int depth;
   final VoidCallback onChanged;
   final VoidCallback onDelete;
-  const _SubTaskTile({required this.sub, required this.depth, required this.onChanged, required this.onDelete});
+  const SubTaskTile({super.key, required this.sub, required this.depth, required this.onChanged, required this.onDelete});
   @override
-  State<_SubTaskTile> createState() => _SubTaskTileState();
+  State<SubTaskTile> createState() => SubTaskTileState();
 }
 
-class _SubTaskTileState extends State<_SubTaskTile> {
+class SubTaskTileState extends State<SubTaskTile> {
   bool _expanded = true;
   late final TextEditingController _ctrl;
 
@@ -367,7 +392,7 @@ class _SubTaskTileState extends State<_SubTaskTile> {
         ]),
       ),
       if (_expanded)
-        ...s.children.map((child) => _SubTaskTile(
+        ...s.children.map((child) => SubTaskTile(
           sub: child, depth: widget.depth + 1,
           onChanged: widget.onChanged,
           onDelete: () { setState(() => s.children.remove(child)); widget.onChanged(); },

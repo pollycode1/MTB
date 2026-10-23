@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
+import 'package:flutter/services.dart';
 import 'dart:convert';
-import 'dart:math' as math;
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
@@ -16,12 +15,9 @@ const _cSurf      = kCSurf;
 const _cText      = kCText;
 const _cGold      = kCGold;
 const _cGoldDark  = kCGoldDark;
-const _cGoldLight = kCGoldLight;
-const _cCream     = kCCream;
 const _cGreen     = kCGreen;
 const _cGreenDark = kCGreenDk;
 const _cRed       = kCRed;
-const _cDark      = kCDark;
 const _kMono      = kMono;
 
 
@@ -33,51 +29,40 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
-  int _spent = 0;
-  int? _askingBudget;
   bool _entered = false;
+  bool _showAllPending = false;
   int _tabIdx = 0;
   String _historyFilter = 'เดือนนี้';
   String _areaFilter = '';
+  String? _pendingIdeaTitle;
+  bool _tasksLoaded = false;
 
+  final Set<int> _expandedCards = {};
   final List<TaskItem> _tasks = [
     TaskItem(title: 'เตรียมสื่อการสอนคณิต', meta: 'เสร็จ 08:12 · เร็วกว่ากำหนด 48 นาที', done: true),
     TaskItem(title: 'ตรวจใบงาน ป.4 (18 ชุด)', meta: 'เลื่อนมาแล้ว 2 ครั้ง', warn: true,
         tag: 'สอน', tagBg: const Color(0x284F7A5B), tagColor: const Color(0xFF3F6349)),
-    TaskItem(title: 'ซื้ออุปกรณ์ทำสื่อ', meta: 'ภายในวันพุธ · งบผูกไว้',
-        tag: 'งบ ฿500', tagBg: const Color(0x33AAAAAA), tagColor: const Color(0xFF888888), budget: 500),
+    TaskItem(title: 'ซื้ออุปกรณ์ทำสื่อ', meta: 'ภายในวันพุธ'),
   ];
 
-  final List<ExpenseItem> _expenses = [
-    ExpenseItem('กาแฟเช้า', 65),
-    ExpenseItem('ค่ารถ', 40),
-    ExpenseItem('ข้าวกลางวัน', 85),
-    ExpenseItem('ซื้อชอล์ก', 130),
-  ];
-
-
-  Timer? _spendTimer;
-
-  static const _weekBase = 1180;
-  static const _target   = 320;
-  int _weekBudget = 2500;
   String _userName = '';
 
   @override
   void initState() {
     super.initState();
     Future.delayed(const Duration(milliseconds: 30), () { if (mounted) setState(() => _entered = true); });
-    final step = math.max(1, (_target / 22).ceil());
-    _spendTimer = Timer.periodic(const Duration(milliseconds: 45), (t) {
-      setState(() => _spent = (_spent + step).clamp(0, _target));
-      if (_spent >= _target) { t.cancel(); _updateWidget(); }
-    });
     WidgetsBinding.instance.addObserver(this);
     HomeWidget.setAppGroupId('group.com.example.mtb');
     NotificationService.scheduleWeeklyReview();
     _loadSettings();
     _loadTasks().then((_) {
+      _tasksLoaded = true;
       Future.delayed(const Duration(milliseconds: 500), _updateWidget);
+      if (_pendingIdeaTitle != null) {
+        final t = _pendingIdeaTitle!;
+        _pendingIdeaTitle = null;
+        _openIdeaByTitle(t);
+      }
     });
     HomeWidget.initiallyLaunchedFromHomeWidget().then(_handleWidgetLaunch);
     HomeWidget.widgetClicked.listen(_handleWidgetLaunch);
@@ -86,29 +71,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) setState(() {
-      _weekBudget = prefs.getInt('settings_weekly_budget') ?? 2500;
       _userName   = prefs.getString('settings_name') ?? '';
     });
   }
 
-  Future<void> _saveSettings(int budget, String name) async {
+  Future<void> _saveSettings(String name) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('settings_weekly_budget', budget);
     await prefs.setString('settings_name', name);
   }
 
   void _openSettings() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(
       tasks: _tasks,
-      weeklyBudget: _weekBudget,
       userName: _userName,
-      onSave: (budget, name, clearedAll) {
+      onSave: (name, clearedAll) {
         setState(() {
-          _weekBudget = budget;
           _userName   = name;
-          if (clearedAll) _tasks.clear();
+          if (clearedAll) {
+            NotificationService.cancelAll().then((_) => NotificationService.scheduleWeeklyReview());
+            _tasks.clear();
+          }
         });
-        _saveSettings(budget, name);
+        _saveSettings(name);
         _saveTasks();
         _updateWidget();
       },
@@ -132,6 +116,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
     try {
       final list = jsonDecode(raw) as List;
+      final missingId = list.any((j) => (j as Map<String, dynamic>)['id'] == null);
       if (mounted) {
         setState(() {
           _tasks
@@ -139,15 +124,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             ..addAll(list.map((j) => TaskItem.fromJson(j as Map<String, dynamic>)));
         });
       }
+      // งานเก่า (หรือที่เพิ่มจากวิดเจ็ต) ยังไม่มี id → บันทึกและตั้งการแจ้งเตือนใหม่ทั้งหมด
+      if (missingId) await _migrateNotificationIds();
     } catch (_) {
       // corrupt data — keep hardcoded defaults
     }
+    _runRules();
+  }
+
+  Future<void> _migrateNotificationIds() async {
+    await NotificationService.cancelAll();
+    await NotificationService.scheduleWeeklyReview();
+    for (final t in _tasks) {
+      await NotificationService.scheduleDeadline(t.id, t);
+    }
+    await _saveTasks();
+  }
+
+  void _runRules() {
+    final now = DateTime.now();
+    bool changed = false;
+    for (final t in _tasks) {
+      if (t.archivedAt != null || t.done) continue;
+      // waiting escalation: 7 วันไม่มีการอัปเดต → ติดตาม
+      if (t.type == 'waiting') {
+        final last = t.lastUpdatedAt ?? t.doneAt ?? now;
+        if (now.difference(last).inDays >= 7 && t.tag != 'ติดตาม') {
+          t.tag = 'ติดตาม';
+          t.tagBg = const Color(0x33D8A93F);
+          t.tagColor = kCGoldDark;
+          changed = true;
+        }
+      }
+      // idea decay: 60 วันไม่แตะ → archive
+      if (t.type == 'idea') {
+        final last = t.lastUpdatedAt ?? now;
+        if (now.difference(last).inDays >= 60) {
+          t.archivedAt = now;
+          changed = true;
+        }
+      }
+    }
+    if (changed) _saveTasks();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _spendTimer?.cancel();
     super.dispose();
   }
 
@@ -168,39 +191,77 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   List<int> get _inboxIdx => List.generate(_tasks.length, (i) => i)
       .where((i) => _tasks[i].type == 'inbox').toList();
   List<int> get _ideaIdx => List.generate(_tasks.length, (i) => i)
-      .where((i) => _tasks[i].type == 'idea').toList();
+      .where((i) => _tasks[i].type == 'idea' && _tasks[i].archivedAt == null).toList();
+  List<int> get _archivedIdx => List.generate(_tasks.length, (i) => i)
+      .where((i) => _tasks[i].archivedAt != null).toList();
+  List<int> get _escalatedWaitingIdx => List.generate(_tasks.length, (i) => i)
+      .where((i) => _tasks[i].type == 'waiting' && _tasks[i].tag == 'ติดตาม' && !_tasks[i].done && _tasks[i].archivedAt == null).toList();
 
-  int get _weekSpent => _weekBase + _spent;
-  int get _pct       => (_weekSpent / _weekBudget * 100).round().clamp(0, 100);
-  bool get _overPace => _pct > 62;
+  void _openIdeaByTitle(String title) {
+    // ponytail: search after delay so _loadTasks() from didChangeAppLifecycleState can finish first
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      final idx = _tasks.indexWhere((t) => t.type == 'idea' && t.title == title);
+      if (idx < 0) return;
+      setState(() => _tabIdx = 2);
+      Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
+        task: _tasks[idx],
+        taskIndex: idx,
+        onDelete: () {
+          NotificationService.cancel(_tasks[idx].id);
+          setState(() => _tasks.removeAt(idx));
+          _saveTasks();
+          _updateWidget();
+        },
+        onChanged: () { _saveTasks(); _updateWidget(); setState(() {}); },
+      ))).then((_) => setState(() {}));
+    });
+  }
 
   void _handleWidgetLaunch(Uri? uri) {
     if (uri == null || !mounted) return;
     switch (uri.host) {
       case 'add':
         Future.delayed(const Duration(milliseconds: 400), () { if (mounted) _openInput(); });
-      case 'expenses':
-        setState(() => _tabIdx = 3);
       case 'toggle':
         final idx = int.tryParse(uri.pathSegments.firstOrNull ?? '');
         if (idx != null && idx < _tasks.length) _toggle(idx);
       case 'task':
         setState(() => _tabIdx = 0);
+      case 'idea':
+        setState(() => _tabIdx = 2);
+        final title = uri.queryParameters['t'];
+        if (title != null && title.isNotEmpty) {
+          if (_tasksLoaded) _openIdeaByTitle(title);
+          else _pendingIdeaTitle = title;
+        }
+      case 'idea-del':
+        final title = uri.queryParameters['t'];
+        if (title != null && title.isNotEmpty) {
+          final idx = _tasks.indexWhere((t) => t.type == 'idea' && t.title == title);
+          if (idx >= 0) {
+            NotificationService.cancel(_tasks[idx].id);
+            setState(() => _tasks.removeAt(idx));
+            _saveTasks();
+            _updateWidget();
+          }
+          SystemNavigator.pop();  // ย่อแอพกลับไป launcher
+        }
       case 'open':
         break;
     }
   }
 
   Future<void> _updateWidget() async {
-    await HomeWidget.saveWidgetData('spent_today', _spent);
-    await HomeWidget.saveWidgetData('week_budget', _weekBudget);
-    await HomeWidget.saveWidgetData('week_base', _weekBase);
     await HomeWidget.saveWidgetData('pending_tasks', _pendingIdx.length);
     await HomeWidget.saveWidgetData('total_tasks', _tasks.length);
-    // full task list through home_widget channel so factory can always read it
-    final tasksJson = jsonEncode(_tasks.map((t) => t.toJson()).toList());
+    // full task list sorted: pending first, done newest-first
+    final pending = _tasks.where((t) => t.type == 'task' && !t.done).toList();
+    final done = _tasks.where((t) => t.type == 'task' && t.done).toList()
+      ..sort((a, b) => (b.doneAt ?? DateTime(0)).compareTo(a.doneAt ?? DateTime(0)));
+    final sorted = [...pending, ...done, ..._tasks.where((t) => t.type != 'task')];
+    final tasksJson = jsonEncode(sorted.map((t) => t.toJson()).toList());
     await HomeWidget.saveWidgetData('tasks_json', tasksJson);
-    await HomeWidget.updateWidget(androidName: 'MtbBudgetWidget');
     await HomeWidget.updateWidget(androidName: 'MtbTasksWidget');
   }
 
@@ -210,22 +271,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       t.done = !t.done;
       if (t.done) {
         t.doneAt = DateTime.now();
-        if (t.budget != null) _askingBudget = i;
-        NotificationService.cancel(i);
+        NotificationService.cancel(t.id);
         // auto-create next occurrence for recurring tasks
         if (t.recurrence != null && t.deadline != null) {
           final next = _nextDeadline(t.deadline!, t.recurrence!);
           final clone = TaskItem(
             title: t.title, meta: t.meta, warn: t.warn,
             tag: t.tag, tagBg: t.tagBg, tagColor: t.tagColor,
-            budget: t.budget, deadline: next, recurrence: t.recurrence,
+            deadline: next, recurrence: t.recurrence,
+            priority: t.priority, area: t.area, nextAction: t.nextAction,
+            lastUpdatedAt: DateTime.now(),
           );
           _tasks.add(clone);
-          NotificationService.scheduleDeadline(_tasks.length - 1, clone);
+          NotificationService.scheduleDeadline(clone.id, clone);
         }
       } else {
         t.doneAt = null;
-        NotificationService.scheduleDeadline(i, t);
+        NotificationService.scheduleDeadline(t.id, t);
       }
     });
     _saveTasks();
@@ -294,9 +356,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   void _addToInbox(String text) {
-    setState(() => _tasks.add(TaskItem(title: text, meta: 'inbox', type: 'inbox')));
+    setState(() => _tasks.add(TaskItem(title: text, meta: 'inbox', type: 'inbox', lastUpdatedAt: DateTime.now())));
     _saveTasks();
     _updateWidget();
+    // 2-minute rule: งานสั้น ไม่มี deadline → ถามว่าทำเลยไหม
+    if (text.length < 30) {
+      Future.microtask(() {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: _cSurf,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            title: const Text('ทำเลยไหม? ⚡', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _cText)),
+            content: Text('"$text"\nดูเหมือนใช้เวลาไม่เกิน 2 นาที', style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .7))),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text('เข้า inbox ก่อน', style: TextStyle(color: _cText.withValues(alpha: .5)))),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  // convert ล่าสุดเป็น task type แล้ว mark done ทันที
+                  setState(() {
+                    final t = _tasks.last;
+                    t.type = 'task';
+                    t.meta = 'ทำเสร็จแล้ว (2-min rule)';
+                    t.done = true;
+                    t.doneAt = DateTime.now();
+                  });
+                  _saveTasks();
+                  _updateWidget();
+                },
+                child: const Text('ทำเสร็จแล้ว ✓', style: TextStyle(color: _cGreen, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        );
+      });
+    }
   }
 
   void _openIdeaInput() {
@@ -360,9 +456,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _cBg,
-      floatingActionButton: _tabIdx < 4
+      floatingActionButton: _tabIdx < 3
           ? GestureDetector(
-              onTap: _tabIdx == 3 ? _openExpenseInput : _tabIdx == 2 ? _openIdeaInput : _openInput,
+              onTap: _tabIdx == 2 ? _openIdeaInput : _openInput,
               child: Container(
                 width: 52, height: 52,
                 decoration: BoxDecoration(
@@ -374,10 +470,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
               ),
             )
           : null,
-      body: Stack(children: [
-        _buildMain(),
-        if (_askingBudget != null) _buildBudgetSheet(),
-      ]),
+      body: _buildMain(),
     );
   }
 
@@ -404,9 +497,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           else if (_tabIdx == 2)
             _ideaContent()
           else if (_tabIdx == 3)
-            _expensesContent()
+            _historyContent()
           else
-            _historyContent(),
+            _archivedContent(),
         ]),
       )),
     ]);
@@ -423,9 +516,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         const SizedBox(width: 8),
         _tabBtn(2, 'ไอเดีย'),
         const SizedBox(width: 8),
-        _tabBtn(3, 'รายจ่าย'),
+        _tabBtn(3, 'ประวัติ'),
         const SizedBox(width: 8),
-        _tabBtn(4, 'ประวัติ'),
+        _tabBtn(4, 'เก็บถาวร', badge: _archivedIdx.length),
       ]),
     );
   }
@@ -468,6 +561,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       pending = pending.where((i) => _tasks[i].area == _areaFilter).toList();
       done    = done.where((i) => _tasks[i].area == _areaFilter).toList();
     }
+    pending = _rankForFocus(pending);
+    final focus = pending.take(5).toList();
+    final rest  = pending.skip(5).toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _areaFilterRow(),
       const SizedBox(height: 12),
@@ -478,10 +574,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .4)))),
         )
       else ...[
-        if (pending.isNotEmpty) ...[
-          _sectionLabel('ค้างอยู่ · ${pending.length} งาน'),
+        if (focus.isNotEmpty) ...[
+          _sectionLabel('โฟกัสวันนี้ · ${focus.length} งาน'),
           const SizedBox(height: 10),
-          ...pending.asMap().entries.map((e) => _staggered(e.key, _taskCard(e.value, done: false))),
+          ...focus.asMap().entries.map((e) => _staggered(e.key, _taskCard(e.value, done: false))),
+        ],
+        if (rest.isNotEmpty) ...[
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _showAllPending = !_showAllPending),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(_showAllPending ? 'ซ่อนงานที่เหลือ ▴' : 'งานที่เหลือ · ${rest.length} งาน ▾',
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGoldDark)),
+            ),
+          ),
+          if (_showAllPending) ...rest.map((i) => _taskCard(i, done: false)),
         ],
         if (done.isNotEmpty) ...[
           const SizedBox(height: 6),
@@ -489,8 +597,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           const SizedBox(height: 8),
           ...done.map((i) => _taskCard(i, done: true)),
         ],
+        if (_escalatedWaitingIdx.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _sectionLabel('ติดตาม — รอเกิน 7 วัน'),
+          const SizedBox(height: 8),
+          ..._escalatedWaitingIdx.map((i) {
+            final t = _tasks[i];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                color: _cSurf,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _cGoldDark.withValues(alpha: .35)),
+              ),
+              child: Row(children: [
+                Icon(Icons.hourglass_top_rounded, size: 15, color: _cGoldDark),
+                const SizedBox(width: 10),
+                Expanded(child: Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _cText))),
+                GestureDetector(
+                  onTap: () { setState(() { t.tag = null; t.tagBg = null; t.tagColor = null; t.lastUpdatedAt = DateTime.now(); }); _saveTasks(); },
+                  child: Text('อัปเดตแล้ว', style: TextStyle(fontSize: 11, color: _cGoldDark, fontWeight: FontWeight.w600)),
+                ),
+              ]),
+            );
+          }),
+        ],
       ],
     ]);
+  }
+
+  // เรียงงานค้างตามความเร่งด่วน: เกินกำหนด → วันนี้ → ภายใน 2 วัน → ตามความสำคัญ
+  List<int> _rankForFocus(List<int> idxs) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    int rank(TaskItem t) {
+      final d = t.deadline;
+      if (d != null) {
+        if (d.isBefore(now)) return 0;
+        if (d.isBefore(today.add(const Duration(days: 1)))) return 1;
+        if (d.isBefore(today.add(const Duration(days: 3)))) return 2;
+      }
+      return 2 + t.priority; // priority 1..3 → 3..5
+    }
+    final sorted = [...idxs];
+    sorted.sort((a, b) {
+      final ta = _tasks[a], tb = _tasks[b];
+      final r = rank(ta).compareTo(rank(tb));
+      if (r != 0) return r;
+      final p = ta.priority.compareTo(tb.priority);
+      if (p != 0) return p;
+      final da = ta.deadline, db = tb.deadline;
+      if (da != null && db != null) {
+        final c = da.compareTo(db);
+        if (c != 0) return c;
+      } else if (da != null) {
+        return -1;
+      } else if (db != null) {
+        return 1;
+      }
+      return a.compareTo(b);
+    });
+    return sorted;
   }
 
   Widget _areaFilterRow() {
@@ -663,114 +831,124 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       const SizedBox(height: 10),
       ...indices.map((i) {
         final t = _tasks[i];
+        final resurface = t.reviewCount >= 3;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (resurface)
+            Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(color: _cGreen.withValues(alpha: .12), borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _cGreen.withValues(alpha: .3))),
+              child: Row(children: [
+                Icon(Icons.auto_awesome, size: 13, color: _cGreen),
+                const SizedBox(width: 6),
+                Expanded(child: Text('สนใจมา 3 รอบแล้ว — แปลงเป็น task?',
+                  style: TextStyle(fontSize: 12, color: _cGreen, fontWeight: FontWeight.w600))),
+                GestureDetector(
+                  onTap: () {
+                    setState(() { t.type = 'task'; t.meta = ''; t.reviewCount = 0; t.lastUpdatedAt = DateTime.now(); });
+                    _saveTasks();
+                  },
+                  child: Text('แปลง ✓', style: TextStyle(fontSize: 11, color: _cGreen, fontWeight: FontWeight.w700)),
+                ),
+              ]),
+            ),
+          GestureDetector(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
+              task: t,
+              taskIndex: i,
+              onDelete: () { NotificationService.cancel(t.id); setState(() => _tasks.remove(t)); _saveTasks(); _updateWidget(); },
+              onChanged: () { _saveTasks(); _updateWidget(); setState(() {}); },
+            ))).then((_) => setState(() {})),
+            child: Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+            decoration: BoxDecoration(
+              color: _cSurf,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: resurface ? _cGreen.withValues(alpha: .25) : _cGold.withValues(alpha: .15)),
+            ),
+            child: Row(children: [
+              Icon(Icons.lightbulb_outline, size: 16, color: _cGoldDark),
+              const SizedBox(width: 10),
+              Expanded(child: Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _cText))),
+              // ยังสนใจอยู่ — นับ review
+              GestureDetector(
+                onTap: () {
+                  setState(() { t.reviewCount++; t.lastUpdatedAt = DateTime.now(); });
+                  _saveTasks();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text('★', style: TextStyle(fontSize: 13,
+                    color: t.reviewCount > 0 ? _cGoldDark : _cText.withValues(alpha: .25))),
+                ),
+              ),
+              GestureDetector(
+                onTap: () { setState(() => _tasks[i].type = 'inbox'); _saveTasks(); setState(() => _tabIdx = 1); },
+                child: Text('→ inbox', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGoldDark)),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: () {
+                  setState(() { t.archivedAt = DateTime.now(); });
+                  _saveTasks();
+                },
+                child: Icon(Icons.close, size: 14, color: _cText.withValues(alpha: .3)),
+              ),
+            ]),
+          ),
+          ),
+        ]);
+      }),
+    ]);
+  }
+
+  // ── Archive tab ───────────────────────────────────────────────────────────────
+
+  Widget _archivedContent() {
+    final indices = _archivedIdx;
+    if (indices.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 60),
+        child: Center(child: Text('ไม่มีรายการเก็บถาวร', style: TextStyle(fontSize: 14, color: _cText.withValues(alpha: .4)))),
+      );
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _sectionLabel('เก็บถาวร · ${indices.length} รายการ'),
+      const SizedBox(height: 4),
+      Text('กู้คืนได้ทุกเมื่อ', style: TextStyle(fontSize: 11, color: _cText.withValues(alpha: .3))),
+      const SizedBox(height: 12),
+      ...indices.map((i) {
+        final t = _tasks[i];
         return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
-            color: _cSurf,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _cGold.withValues(alpha: .15)),
+            color: _cSurf.withValues(alpha: .5),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _cText.withValues(alpha: .07)),
           ),
           child: Row(children: [
-            Icon(Icons.lightbulb_outline, size: 16, color: _cGoldDark),
+            Icon(Icons.archive_outlined, size: 14, color: _cText.withValues(alpha: .35)),
             const SizedBox(width: 10),
-            Expanded(child: Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _cText))),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t.title, style: TextStyle(fontSize: 13.5, color: _cText.withValues(alpha: .55), fontWeight: FontWeight.w500)),
+              Text(t.type, style: TextStyle(fontSize: 10, color: _cText.withValues(alpha: .3))),
+            ])),
             GestureDetector(
-              onTap: () { setState(() => _tasks[i].type = 'inbox'); _saveTasks(); setState(() => _tabIdx = 1); },
-              child: Text('→ inbox', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGoldDark)),
+              onTap: () { setState(() { t.archivedAt = null; t.lastUpdatedAt = DateTime.now(); }); _saveTasks(); },
+              child: Text('กู้คืน', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGoldDark)),
             ),
             const SizedBox(width: 10),
             GestureDetector(
-              onTap: () { setState(() => _tasks.removeAt(i)); _saveTasks(); },
-              child: Icon(Icons.close, size: 14, color: _cText.withValues(alpha: .3)),
+              onTap: () { NotificationService.cancel(t.id); setState(() => _tasks.removeAt(i)); _saveTasks(); _updateWidget(); },
+              child: Icon(Icons.delete_outline, size: 14, color: _cRed.withValues(alpha: .5)),
             ),
           ]),
         );
       }),
     ]);
-  }
-
-  // ── Expenses tab ─────────────────────────────────────────────────────────────
-  Widget _expensesContent() {
-    final groups = <String, List<ExpenseItem>>{};
-    for (final e in _expenses.reversed) {
-      final now = DateTime.now();
-      final d   = e.time;
-      String label;
-      if (d.year == now.year && d.month == now.month && d.day == now.day) label = 'วันนี้';
-      else if (d.year == now.year && d.month == now.month && d.day == now.day - 1) label = 'เมื่อวาน';
-      else label = '${d.day}/${d.month}/${d.year}';
-      groups.putIfAbsent(label, () => []).add(e);
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _spendingCard(),
-      const SizedBox(height: 24),
-      _sectionLabel('รายจ่าย'),
-      const SizedBox(height: 10),
-      if (_expenses.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 32),
-          child: Center(child: Text('ยังไม่มีรายจ่าย',
-            style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .35)))),
-        )
-      else
-        ...groups.entries.expand((entry) => [
-          Padding(padding: const EdgeInsets.only(bottom: 8, top: 4),
-            child: Text(entry.key, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600,
-              color: _cText.withValues(alpha: .38)))),
-          ...entry.value.map((e) => _expenseRow(e)),
-        ]),
-      const SizedBox(height: 80),
-    ]);
-  }
-
-  void _openExpenseInput() {
-    final labelCtrl  = TextEditingController();
-    final amountCtrl = TextEditingController();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [Color(0xFF1C1C1C), Color(0xFF141414)]),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-          ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: _cText.withValues(alpha: .18), borderRadius: BorderRadius.circular(999))),
-            const SizedBox(height: 18),
-            const Align(alignment: Alignment.centerLeft, child: Text('เพิ่มรายจ่าย', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _cText))),
-            const SizedBox(height: 14),
-            _sheetField(labelCtrl, 'ชื่อรายจ่าย เช่น ข้าว กาแฟ'),
-            const SizedBox(height: 10),
-            _sheetField(amountCtrl, 'จำนวนเงิน (บาท)', keyboardType: TextInputType.number),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () {
-                final label  = labelCtrl.text.trim();
-                final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
-                if (label.isEmpty) return;
-                setState(() {
-                  _spent += amount;
-                  _expenses.add(ExpenseItem(label, amount));
-                });
-                _updateWidget();
-                Navigator.pop(context);
-              },
-              child: Container(
-                width: double.infinity, height: 46,
-                decoration: BoxDecoration(color: _cSurf, borderRadius: BorderRadius.circular(14), border: Border.all(color: _cText.withValues(alpha: .2))),
-                child: Center(child: Text('บันทึก', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _cText))),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
   }
 
   // ── History tab ───────────────────────────────────────────────────────────────
@@ -899,57 +1077,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     ]);
   }
 
-  // ── Spending card ─────────────────────────────────────────────────────────────
-  Widget _spendingCard() {
-    final left = (_weekBudget - _weekSpent).clamp(0, _weekBudget);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [Color(0xFF181818), Color(0xFF222222)]),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .5), blurRadius: 44, offset: const Offset(0, 26))],
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('ใช้วันนี้', style: TextStyle(fontSize: 10.5, color: Color(0xFFAAAAAA), fontWeight: FontWeight.w600)),
-              Text('งบสัปดาห์ ฿$_weekBudget', style: TextStyle(fontSize: 10.5, color: _cCream.withValues(alpha: .5))),
-            ]),
-            const SizedBox(height: 12),
-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('฿$_spent', style: const TextStyle(fontFamily: _kMono, fontSize: 52, fontWeight: FontWeight.w600, height: .9, letterSpacing: -1.3, color: Colors.white)),
-              const SizedBox(width: 11),
-              Padding(padding: const EdgeInsets.only(bottom: 7),
-                child: Text(_overPace ? 'เร็วกว่างบ' : 'อยู่ในงบ',
-                  style: TextStyle(fontSize: 11.5, color: _overPace ? const Color(0xFFE8A08C) : const Color(0xFFC0D8C4)))),
-            ]),
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: SizedBox(height: 6, child: Stack(children: [
-                Container(color: _cCream.withValues(alpha: .14)),
-                AnimatedFractionallySizedBox(
-                  duration: const Duration(milliseconds: 500), curve: Curves.easeInOut,
-                  widthFactor: _pct / 100,
-                  child: Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [_cGoldDark, _cGoldLight])))),
-              ])),
-            ),
-            const SizedBox(height: 10),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('เหลือในงบ ฿$left', style: TextStyle(fontSize: 10, color: _cCream.withValues(alpha: .42))),
-              GestureDetector(
-                onTap: () => setState(() => _tabIdx = 1),
-                child: Text('ดูรายจ่าย ${_expenses.length} รายการ ›',
-                  style: TextStyle(fontSize: 10, color: _cText.withValues(alpha: .5), fontWeight: FontWeight.w600)),
-              ),
-            ]),
-          ]),
-      ),
-    );
-  }
-
   // ── Task card ─────────────────────────────────────────────────────────────────
   Widget _staggered(int listIdx, Widget child) {
     final dur = Duration(milliseconds: 220 + listIdx * 50);
@@ -967,9 +1094,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           task: t,
           taskIndex: i,
           onDelete: () {
-            NotificationService.cancel(i);
-            setState(() => _tasks.removeAt(i));
+            NotificationService.cancel(t.id);
+            setState(() => _tasks.remove(t));
             _saveTasks();
+            _updateWidget();
           },
           onChanged: () { _saveTasks(); setState(() {}); },
         )
@@ -990,47 +1118,81 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
               border: Border.all(color: _cText.withValues(alpha: done ? .05 : .09)),
               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .4), blurRadius: 26, offset: const Offset(0, 14), spreadRadius: -22)],
             ),
-            child: Row(children: [
-              // checkbox — tap only here to toggle
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () { _toggle(i); },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutBack,
-                  width: 23, height: 23, margin: const EdgeInsets.only(left: 6),
-                  decoration: BoxDecoration(
-                    color: done ? _cGreen : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: done ? _cGreen : _cText.withValues(alpha: .5), width: 1.8),
-                    boxShadow: [BoxShadow(color: done ? _cGreen.withValues(alpha: .5) : Colors.transparent, blurRadius: 10, offset: const Offset(0, 4))],
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                // checkbox — tap only here to toggle
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () { _toggle(i); },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutBack,
+                    width: 23, height: 23, margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: done ? _cGreen : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: done ? _cGreen : _cText.withValues(alpha: .5), width: 1.8),
+                      boxShadow: [BoxShadow(color: done ? _cGreen.withValues(alpha: .5) : Colors.transparent, blurRadius: 10, offset: const Offset(0, 4))],
+                    ),
+                    child: done ? const Icon(Icons.check, size: 13, color: Colors.white) : null,
                   ),
-                  child: done ? const Icon(Icons.check, size: 13, color: Colors.white) : null,
                 ),
-              ),
-              const SizedBox(width: 13),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(t.title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
-                  color: done ? _cText.withValues(alpha: .4) : _cText, height: 1.35,
-                  decoration: done ? TextDecoration.lineThrough : null,
-                  decorationColor: _cText.withValues(alpha: .4))),
-                const SizedBox(height: 4),
-                Text(t.meta, style: TextStyle(fontSize: 10.5,
-                  color: (!done && t.warn) ? _cRed : _cText.withValues(alpha: done ? .32 : .5))),
-                if (t.deadline != null && !done) ...[
-                  const SizedBox(height: 5),
-                  _deadlineBadge(t.deadline!),
+                const SizedBox(width: 13),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(t.title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
+                    color: done ? _cText.withValues(alpha: .4) : _cText, height: 1.35,
+                    decoration: done ? TextDecoration.lineThrough : null,
+                    decorationColor: _cText.withValues(alpha: .4))),
+                  const SizedBox(height: 4),
+                  Text(t.meta, style: TextStyle(fontSize: 10.5,
+                    color: (!done && t.warn) ? _cRed : _cText.withValues(alpha: done ? .32 : .5))),
+                  if (t.deadline != null && !done) ...[
+                    const SizedBox(height: 5),
+                    _deadlineBadge(t.deadline!),
+                  ],
+                  if (t.subTasks.isNotEmpty && !_expandedCards.contains(t.id)) ...[
+                    const SizedBox(height: 5),
+                    _subTaskProgress(t.subTasks),
+                  ],
+                ])),
+                if (t.tag != null) ...[
+                  const SizedBox(width: 8),
+                  Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(color: t.tagBg, borderRadius: BorderRadius.circular(999)),
+                    child: Text(t.tag!, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: t.tagColor))),
                 ],
-                if (t.subTasks.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  _subTaskProgress(t.subTasks),
-                ],
-              ])),
-              if (t.tag != null) ...[
-                const SizedBox(width: 8),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(color: t.tagBg, borderRadius: BorderRadius.circular(999)),
-                  child: Text(t.tag!, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: t.tagColor))),
+                // expand toggle
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() {
+                    if (_expandedCards.contains(t.id)) _expandedCards.remove(t.id);
+                    else _expandedCards.add(t.id);
+                  }),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 2, 0),
+                    child: Icon(
+                      _expandedCards.contains(t.id) ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      size: 18, color: _cText.withValues(alpha: .28),
+                    ),
+                  ),
+                ),
+              ]),
+              if (_expandedCards.contains(t.id)) ...[
+                Divider(color: _cText.withValues(alpha: .07), height: 18),
+                ...t.subTasks.map((s) => SubTaskTile(
+                  sub: s, depth: 0,
+                  onChanged: () { _saveTasks(); setState(() {}); },
+                  onDelete: () { setState(() => t.subTasks.remove(s)); _saveTasks(); },
+                )),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () { setState(() => t.subTasks.add(SubTask(title: 'ขั้นตอนใหม่'))); _saveTasks(); },
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 2, left: 2),
+                    child: Text('+ เพิ่มขั้นตอน',
+                      style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .3))),
+                  ),
+                ),
               ],
             ]),
           ),
@@ -1066,98 +1228,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
 
-  // ── Expenses panel ────────────────────────────────────────────────────────────
-  Widget _expenseRow(ExpenseItem e) {
-    final h = e.time.hour.toString().padLeft(2, '0');
-    final m = e.time.minute.toString().padLeft(2, '0');
-    return Dismissible(
-      key: ObjectKey(e),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        margin: const EdgeInsets.only(bottom: 9),
-        decoration: BoxDecoration(color: _cRed.withValues(alpha: .15), borderRadius: BorderRadius.circular(16)),
-        child: const Icon(Icons.delete_outline, color: _cRed),
-      ),
-      onDismissed: (_) => setState(() => _expenses.remove(e)),
-      child: GestureDetector(
-        onTap: () => _editExpense(e),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 9),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-          decoration: BoxDecoration(
-            color: _cSurf.withValues(alpha: .95),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _cText.withValues(alpha: .08)),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .3), blurRadius: 18, offset: const Offset(0, 8), spreadRadius: -16)],
-          ),
-          child: Row(children: [
-            Container(width: 36, height: 36,
-              decoration: BoxDecoration(color: _cGold.withValues(alpha: .13), borderRadius: BorderRadius.circular(12)),
-              child: const Center(child: Text('฿', style: TextStyle(fontFamily: _kMono, fontSize: 14, color: _cGoldDark, fontWeight: FontWeight.w700)))),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.label, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: _cText)),
-              const SizedBox(height: 3),
-              Text('$h:$m น.', style: TextStyle(fontSize: 10.5, color: _cText.withValues(alpha: .38))),
-            ])),
-            Text('฿${e.amount}', style: const TextStyle(fontFamily: _kMono, fontSize: 16, fontWeight: FontWeight.w700, color: _cGoldDark)),
-          ]),
-        ),
-      ),
-    );
-  }
-
-  void _editExpense(ExpenseItem e) {
-    final labelCtrl  = TextEditingController(text: e.label);
-    final amountCtrl = TextEditingController(text: e.amount.toString());
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-          decoration: const BoxDecoration(
-            color: Color(0xFF1C1C1C),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-          ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Color(0xFF3A3A3A), borderRadius: BorderRadius.circular(999))),
-            const SizedBox(height: 18),
-            const Align(alignment: Alignment.centerLeft, child: Text('แก้ไขรายจ่าย', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _cText))),
-            const SizedBox(height: 14),
-            _sheetField(labelCtrl, 'ชื่อรายจ่าย'),
-            const SizedBox(height: 10),
-            _sheetField(amountCtrl, 'จำนวนเงิน (บาท)', keyboardType: TextInputType.number),
-            const SizedBox(height: 16),
-            Row(children: [
-              Expanded(child: GestureDetector(
-                onTap: () { setState(() { _expenses.remove(e); }); Navigator.pop(context); },
-                child: Container(height: 46, decoration: BoxDecoration(color: _cRed.withValues(alpha: .1), borderRadius: BorderRadius.circular(14), border: Border.all(color: _cRed.withValues(alpha: .3))),
-                  child: const Center(child: Text('ลบ', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _cRed)))),
-              )),
-              const SizedBox(width: 10),
-              Expanded(flex: 2, child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    e.label  = labelCtrl.text.trim().isEmpty ? e.label : labelCtrl.text.trim();
-                    e.amount = int.tryParse(amountCtrl.text.trim()) ?? e.amount;
-                  });
-                  Navigator.pop(context);
-                },
-                child: Container(height: 46, decoration: BoxDecoration(gradient: const LinearGradient(colors: [_cGoldDark, _cGold]), borderRadius: BorderRadius.circular(14)),
-                  child: const Center(child: Text('บันทึก', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1A2018))))),
-              )),
-            ]),
-          ]),
-        ),
-      ),
-    );
-  }
-
   Widget _sheetField(TextEditingController ctrl, String hint, {TextInputType keyboardType = TextInputType.text}) {
     return TextField(
       controller: ctrl, keyboardType: keyboardType,
@@ -1168,62 +1238,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _cGoldDark, width: 1.5)),
-      ),
-    );
-  }
-
-  // ── Budget sheet ──────────────────────────────────────────────────────────────
-  Widget _buildBudgetSheet() {
-    final taskBudget = _tasks[_askingBudget!].budget!;
-    final amounts    = [430, taskBudget, 560];
-    return GestureDetector(
-      onTap: () => setState(() => _askingBudget = null),
-      child: Container(
-        color: _cDark.withValues(alpha: .55),
-        child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
-          GestureDetector(
-            onTap: () {},
-            child: Container(
-              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).padding.bottom + 24),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1C1C1C), Color(0xFF141414)]),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-              ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-                Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: _cText.withValues(alpha: .18), borderRadius: BorderRadius.circular(999)))),
-                const SizedBox(height: 18),
-                Text('งานนี้ผูกงบไว้ ฿$taskBudget', style: const TextStyle(fontSize: 10.5, color: _cGoldDark, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 7),
-                const Text('ใช้ไปเท่าไหร่จริง', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: _cText)),
-                const SizedBox(height: 5),
-                Text('บันทึกเป็นรายจ่ายให้เลย', style: TextStyle(fontSize: 12.5, color: _cText.withValues(alpha: .55))),
-                const SizedBox(height: 18),
-                Row(children: List.generate(3, (i) {
-                  final amt = amounts[i];
-                  final mid = i == 1;
-                  return Expanded(child: GestureDetector(
-                    onTap: () => setState(() { _spent += amt; _askingBudget = null; }),
-                    child: Container(
-                      margin: EdgeInsets.only(left: i > 0 ? 9 : 0),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(
-                        color: mid ? const Color(0xFFE2E2E2) : _cSurf,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _cText.withValues(alpha: mid ? 0 : .12)),
-                      ),
-                      child: Center(child: Text('฿$amt', style: TextStyle(fontFamily: _kMono, fontSize: 15, fontWeight: FontWeight.w600, color: mid ? const Color(0xFF1A2018) : _cText))),
-                    ),
-                  ));
-                })),
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () => setState(() => _askingBudget = null),
-                  child: Center(child: Text('ข้ามไปก่อน', style: TextStyle(fontSize: 12.5, color: _cText.withValues(alpha: .45)))),
-                ),
-              ]),
-            ),
-          ),
-        ]),
       ),
     );
   }

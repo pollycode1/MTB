@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/task_row"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp">
+
+    <TextView
+        android:id="@+id/task_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#CCCCCC"
+        android:textSize="13sp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:layout_marginBottom="7dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="3">
+
+        <TextView
+            android:id="@+id/inbox_btn_task"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:text="→ งาน"
+            android:textColor="#4A7A58"
+            android:textSize="12sp"
+            android:background="#1A4A7A58"
+            android:layout_marginEnd="4dp" />
+
+        <TextView
+            android:id="@+id/inbox_btn_idea"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:text="→ ไอเดีย"
+            android:textColor="#C8A040"
+            android:textSize="12sp"
+            android:background="#1AC8A040"
+            android:layout_marginEnd="4dp" />
+
+        <TextView
+            android:id="@+id/inbox_btn_delete"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:text="ลบ ✕"
+            android:textColor="#D06050"
+            android:textSize="12sp"
+            android:background="#1AD06050" />
+
+    </LinearLayout>
+
+</LinearLayout>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/task_row"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:clickable="true"
+    android:focusable="true"
+    android:paddingTop="11dp"
+    android:paddingBottom="11dp"
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp">
+
+    <!-- ไอคอนหลอดไฟ -->
+    <TextView
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:text="💡"
+        android:textSize="12sp"
+        android:gravity="center" />
+
+    <!-- ชื่อไอเดีย (กดเพื่อเปิดแอพ) -->
+    <TextView
+        android:id="@+id/task_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="8dp"
+        android:textColor="#C8A040"
+        android:textSize="13sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <!-- ปุ่มลบ -->
+    <TextView
+        android:id="@+id/idea_btn_delete"
+        android:layout_width="36dp"
+        android:layout_height="28dp"
+        android:gravity="center"
+        android:text="✕"
+        android:textColor="#D06050"
+        android:textSize="14sp"
+        android:layout_marginStart="6dp" />
+
+</LinearLayout>

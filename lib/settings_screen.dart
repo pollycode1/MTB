@@ -1,18 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 
 class SettingsScreen extends StatefulWidget {
   final List<TaskItem> tasks;
-  final int weeklyBudget;
   final String userName;
-  final void Function(int budget, String name, bool clearedAll) onSave;
+  final void Function(String name, bool clearedAll) onSave;
 
   const SettingsScreen({
     super.key,
     required this.tasks,
-    required this.weeklyBudget,
     required this.userName,
     required this.onSave,
   });
@@ -23,20 +19,17 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _nameCtrl;
-  late final TextEditingController _budgetCtrl;
   bool _clearedAll = false;
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl   = TextEditingController(text: widget.userName);
-    _budgetCtrl = TextEditingController(text: widget.weeklyBudget.toString());
+    _nameCtrl = TextEditingController(text: widget.userName);
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _budgetCtrl.dispose();
     super.dispose();
   }
 
@@ -44,8 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int get _totalCnt => widget.tasks.length;
 
   void _save() {
-    final budget = int.tryParse(_budgetCtrl.text) ?? widget.weeklyBudget;
-    widget.onSave(budget, _nameCtrl.text.trim(), _clearedAll);
+    widget.onSave(_nameCtrl.text.trim(), _clearedAll);
     Navigator.pop(context);
   }
 
@@ -107,31 +99,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     hintStyle: TextStyle(color: Color(0x5520291F)),
                     isDense: true,
                     contentPadding: EdgeInsets.zero,
-                  ),
-                ),
-              ),
-            ])),
-            const SizedBox(height: 20),
-
-            // ── Budget ─────────────────────────────────────────────────────
-            _sectionLabel('งบประมาณ'),
-            _card(child: Column(children: [
-              _fieldRow(
-                icon: Icons.account_balance_wallet_outlined,
-                label: 'งบรายสัปดาห์ (฿)',
-                child: SizedBox(
-                  width: 100,
-                  child: TextField(
-                    controller: _budgetCtrl,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: kCGoldDark, fontFamily: kMono),
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
                   ),
                 ),
               ),
