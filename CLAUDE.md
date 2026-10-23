@@ -14,28 +14,29 @@ flutter test             # run tests
 
 ## Architecture
 
-Single-screen Flutter app — no routing library, no state management package. Everything flows through `HomeScreen` in `home_screen.dart`.
+Single-screen Flutter app — no routing library, no state management package. Everything flows through `HomeScreen` in `lib/home_screen.dart` (settings and task detail are pushed as plain routes).
 
-**State lives in `_HomeScreenState`** — `_tasks`, `_expenses`, `_habits` are plain Dart lists mutated directly and re-persisted via `SharedPreferences` (key `tasks_json`) on every change. No streams, no ChangeNotifier.
+**State lives in `_HomeScreenState`** — `_tasks` is a plain Dart lists mutated directly and re-persisted via `SharedPreferences` on every change (`tasks_json`). No streams, no ChangeNotifier. Habits were removed; there is no habit model or tab.
 
-**Three tabs inline** — งาน (tasks), นิสัย (habits), ประวัติ (history) — all rendered as `if (_tabIdx == N)` branches inside `_buildMain()`. `habits_screen.dart` exists but is currently unused; the habits UI was moved inline into `HomeScreen`.
+**Five tabs** (index → builder in `_buildMain()`): 0 วันนี้ (`_todayContent`), 1 กล่องรับ (`_inboxContent`), 2 ไอเดีย (`_ideaContent`), 3 ประวัติ (`_historyContent`), 4 เก็บถาวร (`_archivedContent`).
 
-**Auto-categorizer** (`_detect` + `_extractAmount` in `home_screen.dart`) — the single text input classifies itself: Thai baht amounts → expense, keyword `งบ`/`budget` → task-with-budget, otherwise → plain task.
+**GTD flow** — the + button captures text into the inbox (`type: 'inbox'`). Moving an inbox item to a task (`_moveToTask`) requires a `nextAction` and optionally an `area` (สอน/ส่วนตัว/บ้าน). Other types: `idea` (resurfaces after `reviewCount >= 3`, archived after 60 idle days), `waiting` (flagged "ติดตาม" after 7 idle days). Rules run in `_runRules()` on load. `NotificationService.scheduleWeeklyReview()` posts a weekly reminder (id 9999).
 
-**Android home-screen widgets** — two Kotlin AppWidgets (`MtbBudgetWidget`, `MtbTasksWidget`) communicate with Flutter via `home_widget` package + `SharedPreferences` (app group `group.com.example.mtb`). Widget interactions (toggle checkbox) are handled by `widgetCallback` in `main.dart` — a `@pragma('vm:entry-point')` background entry point that runs without the full Flutter app. After any state change, call `_updateWidget()` to push data to both widgets.
+**วันนี้ tab** — pending tasks are ranked by `_rankForFocus` (overdue → due today → due within 2 days → priority). The top 5 are shown as "โฟกัสวันนี้"; the rest sit behind a toggle.
 
-**Notification IDs** — `NotificationService` uses the task's list index as the notification ID. This means index-stable operations (toggle, edit) work correctly, but deletions shift IDs. Be aware when inserting/removing tasks mid-list.
+**Android home-screen widgets** — Kotlin AppWidgets (`MtbTasksWidget`, add-task activity) communicate with Flutter via `home_widget` + `SharedPreferences` (app group `group.com.example.mtb`). The Kotlin side reads and rewrites `flutter.tasks_json` and addresses tasks **by list index**; `widgetCallback` in `main.dart` is the background entry point for checkbox toggles. After any state change, call `_updateWidget()`.
 
-**Recurrence** — when a recurring task (`TaskItem.recurrence != null`) is toggled done, `_HomeScreenState._toggle()` auto-appends a cloned task with the next deadline. No separate recurring-task model.
+**Task ids** — every `TaskItem` has a persistent `id` (generated in `models.dart`, back-filled on load for old data or tasks added by the widget). Use `task.id` for notification ids (`NotificationService.scheduleDeadline(task.id, task)` / `.cancel(task.id)`; priority-1 tasks also use `id + 10000`) and for UI keys such as `_expandedCards`. Never use the list index for either — deleting a task shifts indices. When ids are missing on load, `_migrateNotificationIds()` cancels everything and reschedules. The widget's index-based toggle is the one remaining index dependency.
+
+**Recurrence** — when a recurring task (`TaskItem.recurrence != null`) is toggled done, `_HomeScreenState._toggle()` appends a cloned task (keeping priority, area, nextAction) with the next deadline. No separate recurring-task model.
 
 ## Models (`lib/models.dart`)
 
-- `TaskItem` — serializable to/from JSON, stored in `tasks_json`. `subTasks` are NOT serialized (field exists, `toJson` omits them — they reset on app restart).
-- `HabitItem` / `ExpenseItem` — in-memory only, not persisted.
+- `TaskItem` — serializable to/from JSON, including `id` and `subTasks`.
 - Color constants (`kC*`) and font constant (`kMono = 'IBM Plex Mono'`) live here and are imported everywhere.
 
 ## Key wiring points
 
 - Widget → Flutter: `HomeWidget.widgetClicked` stream → `_handleWidgetLaunch` in `HomeScreen`
 - Flutter → Widget: `HomeWidget.saveWidgetData(key, value)` then `HomeWidget.updateWidget(androidName:)`
-- Notifications: `NotificationService.scheduleDeadline(taskIndex, task)` / `.cancel(taskIndex)` — called from `_toggle()` and `TaskDetailScreen._save()`
+- Notifications: called from `_toggle()`, `TaskDetailScreen._save()` / `_pickDeadline()` / `_clearDeadline()`, and the delete handlers

@@ -45,7 +45,42 @@
             android:background="#1C1C1C" />
     </LinearLayout>
 
-    <!-- Scrollable task list -->
+    <!-- Tab bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:orientation="horizontal"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:id="@+id/tab_today"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="วันนี้"
+            android:textSize="10sp"
+            android:textColor="#E2E2E2" />
+        <TextView
+            android:id="@+id/tab_inbox"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="กล่องรับ"
+            android:textSize="10sp"
+            android:textColor="#555555" />
+        <TextView
+            android:id="@+id/tab_idea"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="ไอเดีย"
+            android:textSize="10sp"
+            android:textColor="#555555" />
+    </LinearLayout>
+
+    <!-- Scrollable list -->
     <ListView
         android:id="@+id/widget_list"
         android:layout_width="match_parent"

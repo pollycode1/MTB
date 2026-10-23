@@ -189,7 +189,6 @@ class AddTaskActivity : Activity() {
                 put("type", "inbox")
                 put("doneAt", JSONObject.NULL)
                 put("tag", JSONObject.NULL); put("tagBg", JSONObject.NULL); put("tagColor", JSONObject.NULL)
-                put("budget", JSONObject.NULL)
             })
             val updated = list.toString()
             flutterPrefs.edit().putString("flutter.tasks_json", updated).apply()

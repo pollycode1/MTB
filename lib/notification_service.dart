@@ -6,44 +6,77 @@ import 'models.dart';
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
+  // HomeScreen ตั้งไว้ให้เปิดหน้าสรุปสัปดาห์เมื่อกดแจ้งเตือนรีวิว
+  static void Function()? onWeeklyTap;
 
   static Future<void> init() async {
     tz.initializeTimeZones();
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _plugin.initialize(const InitializationSettings(android: android));
+    await _plugin.initialize(
+      const InitializationSettings(android: android),
+      onDidReceiveNotificationResponse: (r) {
+        if (r.payload == 'weekly') onWeeklyTap?.call();
+      },
+    );
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
     _ready = true;
   }
 
+  // แอพถูกเปิดจากการกดแจ้งเตือนรีวิวรายสัปดาห์ตอนปิดอยู่หรือไม่
+  static Future<bool> launchedFromWeekly() async {
+    final d = await _plugin.getNotificationAppLaunchDetails();
+    return d?.didNotificationLaunchApp == true && d?.notificationResponse?.payload == 'weekly';
+  }
+
+  // priority 1=สูง → แจ้ง 24h+1h ก่อน, 2=กลาง → 3h ก่อน, 3=ต่ำ → 1h ก่อน
   static Future<void> scheduleDeadline(int id, TaskItem task) async {
     if (!_ready || task.deadline == null || task.done) return;
     final deadline = task.deadline!;
-    final notifyAt = deadline.subtract(const Duration(hours: 1));
-    if (notifyAt.isBefore(DateTime.now())) return;
+    final now = DateTime.now();
 
-    await _plugin.zonedSchedule(
-      id,
-      'กำหนดส่งงานใกล้แล้ว',
-      task.title,
-      tz.TZDateTime.from(notifyAt, tz.local),
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
+    final leadHours = task.priority == 1 ? 24 : task.priority == 3 ? 1 : 3;
+    final notifyAt = deadline.subtract(Duration(hours: leadHours));
+    if (notifyAt.isAfter(now)) {
+      await _plugin.zonedSchedule(
+        id,
+        'กำหนดส่งงานใกล้แล้ว',
+        task.title,
+        tz.TZDateTime.from(notifyAt, tz.local),
+        const NotificationDetails(android: AndroidNotificationDetails(
           'task_deadline', 'กำหนดส่งงาน',
           channelDescription: 'แจ้งเตือนเมื่องานใกล้ถึงกำหนด',
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-      ),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-    );
+          importance: Importance.high, priority: Priority.high,
+        )),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
+    // priority สูง: แจ้งอีกครั้ง 1h ก่อนด้วย (id offset +10000)
+    if (task.priority == 1) {
+      final notifyAt1h = deadline.subtract(const Duration(hours: 1));
+      if (notifyAt1h.isAfter(now)) {
+        await _plugin.zonedSchedule(
+          id + 10000,
+          '⚠️ งานสำคัญ — ใกล้ถึงกำหนดแล้ว',
+          task.title,
+          tz.TZDateTime.from(notifyAt1h, tz.local),
+          const NotificationDetails(android: AndroidNotificationDetails(
+            'task_deadline', 'กำหนดส่งงาน',
+            importance: Importance.max, priority: Priority.max,
+          )),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
+    }
   }
 
   static Future<void> cancel(int id) async {
     if (!_ready) return;
     await _plugin.cancel(id);
+    await _plugin.cancel(id + 10000); // priority-1 extra reminder
   }
 
   static Future<void> cancelAll() async {
@@ -61,7 +94,7 @@ class NotificationService {
     await _plugin.zonedSchedule(
       9999,
       'Weekly Review',
-      'เปิด inbox + idea bucket มาเคลียร์กัน',
+      'ดูสรุปสัปดาห์ + เคลียร์กล่องรับ',
       tz.TZDateTime.from(next, tz.local),
       const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -74,6 +107,7 @@ class NotificationService {
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      payload: 'weekly',
     );
   }
 }
