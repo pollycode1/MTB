@@ -10,8 +10,11 @@ extension _TodayTab on _HomeScreenState {
       done    = done.where((i) => _tasks[i].area == _areaFilter).toList();
     }
     pending = _rankForFocus(pending);
-    final focus = pending.take(5).toList();
-    final rest  = pending.skip(5).toList();
+    // มีแผนเช้าของวันนี้ → โฟกัสตามแผน (กบก่อน) ไม่มี → 5 งานแรกตามลำดับอัตโนมัติ
+    final planned = pending.where((i) => _isPlannedToday(_tasks[i])).toList()
+      ..sort((a, b) => (_tasks[b].isFrog ? 1 : 0) - (_tasks[a].isFrog ? 1 : 0));
+    final focus = planned.isNotEmpty ? planned : pending.take(5).toList();
+    final rest  = pending.where((i) => !focus.contains(i)).toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _areaFilterRow(),
       const SizedBox(height: 12),
@@ -23,7 +26,17 @@ extension _TodayTab on _HomeScreenState {
         )
       else ...[
         if (focus.isNotEmpty) ...[
-          _sectionLabel('โฟกัสวันนี้ · ${focus.length} งาน'),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            _sectionLabel('โฟกัสวันนี้ · ${focus.length} งาน'),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _openMorningPlan,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                child: Text('วางแผน', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGoldDark)),
+              ),
+            ),
+          ]),
           const SizedBox(height: 10),
           ...focus.asMap().entries.map((e) => _staggered(e.key, _taskCard(e.value, done: false))),
         ],
@@ -197,7 +210,7 @@ extension _TodayTab on _HomeScreenState {
                 ),
                 const SizedBox(width: 13),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(t.title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
+                  Text((t.isFrog && !done ? '🐸 ' : '') + t.title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
                     color: done ? _cText.withValues(alpha: .4) : _cText, height: 1.35,
                     decoration: done ? TextDecoration.lineThrough : null,
                     decorationColor: _cText.withValues(alpha: .4))),

@@ -52,6 +52,8 @@ class TaskItem {
   DateTime? lastUpdatedAt;
   int reviewCount;   // idea resurface counter
   DateTime? archivedAt;
+  DateTime? plannedFor; // วันที่เลือกไว้ในแผนเช้า (เทียบเฉพาะวัน)
+  bool isFrog;          // งานกบของวัน
   final List<SubTask> subTasks;
   // รหัสประจำงาน — ใช้เป็น notification id และ key ของ UI แทนลำดับในลิสต์
   final int id;
@@ -83,6 +85,8 @@ class TaskItem {
     this.lastUpdatedAt,
     this.reviewCount = 0,
     this.archivedAt,
+    this.plannedFor,
+    this.isFrog = false,
     List<SubTask>? subTasks,
   }) : id = id ?? _genId(),
        subTasks = subTasks ?? [];
@@ -106,6 +110,8 @@ class TaskItem {
     'lastUpdatedAt': lastUpdatedAt?.toIso8601String(),
     'reviewCount': reviewCount,
     'archivedAt': archivedAt?.toIso8601String(),
+    'plannedFor': plannedFor?.toIso8601String(),
+    'isFrog': isFrog,
     'subTasks': subTasks.map((s) => s.toJson()).toList(),
   };
 
@@ -128,6 +134,8 @@ class TaskItem {
     lastUpdatedAt: j['lastUpdatedAt'] != null ? DateTime.tryParse(j['lastUpdatedAt'] as String) : null,
     reviewCount: j['reviewCount'] as int? ?? 0,
     archivedAt: j['archivedAt'] != null ? DateTime.tryParse(j['archivedAt'] as String) : null,
+    plannedFor: j['plannedFor'] != null ? DateTime.tryParse(j['plannedFor'] as String) : null,
+    isFrog: j['isFrog'] as bool? ?? false,
     subTasks: (j['subTasks'] as List? ?? [])
         .map((s) => SubTask.fromJson(s as Map<String, dynamic>)).toList(),
   );

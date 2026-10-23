@@ -12,6 +12,7 @@ part 'home_inbox.dart';
 part 'home_ideas.dart';
 part 'home_history.dart';
 part 'home_sheets.dart';
+part 'home_plan.dart';
 
 // ── Palette aliases (kept local so no rename needed) ─────────────────────────
 const _cBg        = kCBg;
@@ -64,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     _loadSettings();
     _loadTasks().then((_) {
       _tasksLoaded = true;
+      _maybeShowMorningPlan();
       Future.delayed(const Duration(milliseconds: 500), _updateWidget);
       if (_pendingIdeaTitle != null) {
         final t = _pendingIdeaTitle!;
