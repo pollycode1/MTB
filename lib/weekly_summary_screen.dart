@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'ai_service.dart';
 import 'models.dart';
 
 // สรุปสัปดาห์ (จันทร์–อาทิตย์) คำนวณจากข้อมูลที่มีอยู่ ไม่เก็บอะไรเพิ่ม
@@ -139,6 +141,95 @@ class WeeklySummaryScreen extends StatelessWidget {
               Text('เลื่อน ${t.postponeCount} ครั้ง', style: const TextStyle(fontSize: 11.5, color: kCRed, fontWeight: FontWeight.w600)),
             ]),
           )),
+        const SizedBox(height: 28),
+        _AiWeekInsight(tasks: tasks, s: s),
+      ]),
+    );
+  }
+}
+
+// ให้ AI หารูปแบบที่ทำให้งานค้าง และเสนอสิ่งที่ควรเปลี่ยน 1 ข้อ (กดเมื่อต้องการ ไม่เรียกเอง)
+class _AiWeekInsight extends StatefulWidget {
+  final List<TaskItem> tasks;
+  final WeekSummary s;
+  const _AiWeekInsight({required this.tasks, required this.s});
+  @override
+  State<_AiWeekInsight> createState() => _AiWeekInsightState();
+}
+
+class _AiWeekInsightState extends State<_AiWeekInsight> {
+  bool _busy = false;
+  Map<String, dynamic>? _r;
+  String? _err;
+
+  Future<void> _run() async {
+    setState(() { _busy = true; _err = null; });
+    final s = widget.s;
+    final done = widget.tasks.where((t) => t.type == 'task' && t.done && t.doneAt != null && !t.doneAt!.isBefore(s.weekStart))
+        .map((t) => {'title': t.title, if (t.area != null) 'area': t.area, 'doneAt': t.doneAt!.toIso8601String().substring(0, 16)}).toList();
+    final pending = widget.tasks.where((t) => t.type == 'task' && !t.done && t.archivedAt == null).map(taskForAi).toList();
+    try {
+      final r = await AiService.askJson(
+        system: aiSystem,
+        prompt: '${todayLine()}\nสรุปสัปดาห์: เสร็จ ${s.doneThis} งาน (สัปดาห์ก่อน ${s.doneLast}), ค้าง ${s.pending}, เกินกำหนด ${s.overdue}, รอคัดแยก ${s.inbox}\n'
+            'งานที่เสร็จสัปดาห์นี้: ${jsonEncode(done)}\n'
+            'งานที่ยังค้าง: ${jsonEncode(pending)}\n\n'
+            'วิเคราะห์สั้นๆ: pattern = รูปแบบที่ทำให้งานค้างหรือถูกเลื่อน (อ้างจากข้อมูลจริง), '
+            'strength = สิ่งที่ทำได้ดี 1 ข้อ, suggestion = สิ่งเดียวที่ควรลองทำสัปดาห์หน้า เป็นรูปธรรม',
+        schema: {
+          'type': 'object',
+          'properties': {'pattern': {'type': 'string'}, 'strength': {'type': 'string'}, 'suggestion': {'type': 'string'}},
+          'required': ['pattern', 'strength', 'suggestion'],
+          'additionalProperties': false,
+        },
+      );
+      setState(() => _r = r);
+    } on AiException catch (e) {
+      setState(() => _err = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _line(String label, String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: kCText.withValues(alpha: .4))),
+      const SizedBox(height: 3),
+      Text(text, style: const TextStyle(fontSize: 14, height: 1.4, color: kCText)),
+    ]),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final r = _r;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kCSurf,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kCGoldDark.withValues(alpha: .3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('✨ วิเคราะห์สัปดาห์', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: kCText)),
+          const Spacer(),
+          GestureDetector(
+            onTap: _busy ? null : _run,
+            child: _busy
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: kCGoldDark))
+              : Text(r == null ? 'วิเคราะห์' : 'วิเคราะห์ใหม่',
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: kCGoldDark)),
+          ),
+        ]),
+        if (_err != null) Padding(padding: const EdgeInsets.only(top: 8),
+          child: Text(_err!, style: const TextStyle(fontSize: 12, color: kCRed))),
+        if (r != null) ...[
+          const SizedBox(height: 12),
+          _line('รูปแบบที่ทำให้ค้าง', r['pattern'] as String),
+          _line('ทำได้ดี', r['strength'] as String),
+          _line('ลองสัปดาห์หน้า', r['suggestion'] as String),
+        ],
       ]),
     );
   }

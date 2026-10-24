@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'ai_service.dart';
+import 'attachments.dart';
+import 'backup.dart';
+import 'categories.dart';
 import 'models.dart';
 
 class SettingsScreen extends StatefulWidget {
   final List<TaskItem> tasks;
   final String userName;
   final void Function(String name, bool clearedAll) onSave;
+  final VoidCallback onTasksChanged; // แก้หมวดแล้วงานเปลี่ยนตาม
+  final void Function(List<TaskItem> tasks) onImport; // กู้คืน: แทนที่งานทั้งหมด
 
   const SettingsScreen({
     super.key,
     required this.tasks,
     required this.userName,
     required this.onSave,
+    required this.onImport,
+    required this.onTasksChanged,
   });
 
   @override
@@ -20,11 +30,40 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _nameCtrl;
   bool _clearedAll = false;
+  bool _hasKey = false;
 
   @override
   void initState() {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.userName);
+    AiService.hasKey().then((v) { if (mounted) setState(() => _hasKey = v); });
+  }
+
+  Future<void> _editKey() async {
+    final ctrl = TextEditingController(text: await AiService.apiKey());
+    if (!mounted) return;
+    final key = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kCSurf,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Claude API key', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: kCText)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('สร้างได้ที่ platform.claude.com → API keys\nเก็บไว้ในเครื่องนี้เท่านั้น', style: TextStyle(fontSize: 12, color: kCText.withValues(alpha: .55))),
+          const SizedBox(height: 10),
+          TextField(controller: ctrl, obscureText: true, style: const TextStyle(color: kCText),
+            decoration: InputDecoration(hintText: 'sk-ant-…', hintStyle: TextStyle(color: kCText.withValues(alpha: .3)))),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, ''), child: const Text('ลบ key', style: TextStyle(color: kCRed))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('ยกเลิก', style: TextStyle(color: kCText.withValues(alpha: .5)))),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('บันทึก', style: TextStyle(color: kCGreenDk, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (key == null) return;
+    await AiService.setApiKey(key);
+    if (mounted) setState(() => _hasKey = key.isNotEmpty);
   }
 
   @override
@@ -108,7 +147,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             // ── Tasks ──────────────────────────────────────────────────────
             _sectionLabel('จัดการงาน'),
             _card(child: Column(children: [
+              _actionRow(
+                icon: Icons.folder_outlined,
+                label: 'จัดการหมวดหมู่ (${Categories.list.length})',
+                color: kCText,
+                done: false,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CategoriesScreen(
+                  tasks: widget.tasks, onTasksChanged: widget.onTasksChanged,
+                ))).then((_) { if (mounted) setState(() {}); }),
+              ),
+              _divider(),
               _infoRow(icon: Icons.task_alt_rounded, label: 'งานทั้งหมด', value: '$_totalCnt รายการ'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                child: Text('ไฟล์แนบเก็บที่: ${Attachments.rootPath.contains('/Android/') ? 'Android/${Attachments.rootPath.split('/Android/').last}' : Attachments.rootPath}',
+                  style: TextStyle(fontSize: 11.5, color: kCText.withValues(alpha: .45))),
+              ),
               _infoRow(icon: Icons.check_circle_outline_rounded, label: 'เสร็จแล้ว (ประวัติ)', value: '$_doneCnt รายการ'),
               if (_totalCnt > 0) ...[
                 _divider(),
@@ -123,6 +177,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
               ],
+            ])),
+            const SizedBox(height: 20),
+
+            // ── AI ─────────────────────────────────────────────────────────
+            _sectionLabel('AI (Claude Haiku 5.5)'),
+            _card(child: Column(children: [
+              _actionRow(
+                icon: Icons.key_rounded,
+                label: _hasKey ? 'ใส่ API key แล้ว · แตะเพื่อเปลี่ยน' : 'ใส่ API key เพื่อเปิดใช้ AI',
+                color: _hasKey ? kCGreenDk : kCText,
+                done: false,
+                onTap: _editKey,
+              ),
+            ])),
+            const SizedBox(height: 20),
+
+            // ── Backup ─────────────────────────────────────────────────────
+            _sectionLabel('สำรองข้อมูล'),
+            _card(child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Text('สำรองอัตโนมัติวันละไฟล์ (รวมไฟล์แนบ) เก็บ 7 วันล่าสุดที่:\n'
+                    '${AutoBackup.lastPath ?? '${AutoBackup.publicDir}/'}',
+                  style: TextStyle(fontSize: 11.5, color: kCText.withValues(alpha: .45))),
+              ),
+              _actionRow(
+                icon: Icons.file_open_outlined,
+                label: 'กู้คืนจากไฟล์สำรอง (แทนที่งานทั้งหมด)',
+                color: kCText,
+                done: false,
+                onTap: () async {
+                  final picked = await FilePicker.pickFiles();
+                  if (picked.isEmpty) return;
+                  await _restore(await picked.first.xFile.readAsString());
+                },
+              ),
+              _divider(),
+              _actionRow(
+                icon: Icons.copy_all_rounded,
+                label: 'คัดลอกข้อมูลสำรอง (วางเก็บไว้ในโน้ตได้)',
+                color: kCText,
+                done: false,
+                onTap: () async {
+                  await Clipboard.setData(ClipboardData(text: buildBackup(widget.tasks)));
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('คัดลอกงาน $_totalCnt รายการแล้ว')));
+                  }
+                },
+              ),
+              _divider(),
+              _actionRow(
+                icon: Icons.restore_rounded,
+                label: 'กู้คืนจากคลิปบอร์ด (แทนที่งานทั้งหมด)',
+                color: kCText,
+                done: false,
+                onTap: () async =>
+                    _restore((await Clipboard.getData(Clipboard.kTextPlain))?.text ?? ''),
+              ),
             ])),
             const SizedBox(height: 20),
 
@@ -198,6 +311,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ]),
     ),
   );
+
+  Future<void> _restore(String text) async {
+    final restored = parseBackup(text);
+    if (!mounted) return;
+    if (restored == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ไม่ใช่ข้อมูลสำรองของ MTB')));
+      return;
+    }
+    final ok = await _confirm('กู้คืนข้อมูล?', 'งานปัจจุบัน $_totalCnt รายการจะถูกแทนที่ด้วย ${restored.length} รายการจากข้อมูลสำรอง');
+    if (!ok) return;
+    await AutoBackup.restoreFiles(text);
+    if (!mounted) return;
+    widget.onImport(restored);
+    Navigator.pop(context);
+  }
 
   Future<bool> _confirm(String title, String body) async {
     return await showDialog<bool>(

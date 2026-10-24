@@ -159,6 +159,55 @@ extension _MorningPlan on _HomeScreenState {
     }
     final decided = <TaskItem, String>{}; // 'do' | 'split' | 'drop'
     final stuck = items.where((t) => t.postponeCount >= kStuckAt).toList();
+    final aiNotes = <TaskItem, String>{}; // เหตุผล + ขั้นแรกจาก AI
+    final aiSteps = <TaskItem, String>{};
+    var aiBusy = false;
+    String? aiError;
+
+    Future<void> askAi(StateSetter setS) async {
+      setS(() { aiBusy = true; aiError = null; });
+      try {
+        final r = await AiService.askJson(
+          system: aiSystem,
+          prompt: '${todayLine()}\nงานค้างทั้งหมด (JSON):\n${jsonEncode(items.map(taskForAi).toList())}\n\n'
+              'เลือกงานที่ควรทำวันนี้ไม่เกิน 5 งาน (วันงานเยอะให้เลือกน้อยลง) ให้น้ำหนักกับงานเกินกำหนด ใกล้กำหนด และงานที่ถูกเลื่อนบ่อย '
+              'เลือก 1 งานเป็น "กบ" คืองานสำคัญที่น่าจะผัดมากที่สุด ให้ทำเป็นอย่างแรก '
+              'แต่ละงานให้เหตุผลสั้นๆ 1 ประโยค และขั้นแรกที่เริ่มได้ใน 5 นาที',
+          schema: {
+            'type': 'object',
+            'properties': {
+              'picks': {'type': 'array', 'items': {
+                'type': 'object',
+                'properties': {'id': {'type': 'integer'}, 'reason': {'type': 'string'}, 'firstStep': {'type': 'string'}},
+                'required': ['id', 'reason', 'firstStep'],
+                'additionalProperties': false,
+              }},
+              'frogId': {'type': 'integer'},
+            },
+            'required': ['picks', 'frogId'],
+            'additionalProperties': false,
+          },
+        );
+        final byId = {for (final t in items) t.id: t};
+        setS(() {
+          picked..clear()..addAll(stuck); // งานที่ติดยังต้องตัดสินใจเหมือนเดิม
+          aiNotes.clear(); aiSteps.clear();
+          for (final p in (r['picks'] as List).cast<Map<String, dynamic>>()) {
+            final t = byId[(p['id'] as num).toInt()];
+            if (t == null) continue;
+            picked.add(t);
+            aiNotes[t] = '${p['reason']}  ·  เริ่ม: ${p['firstStep']}';
+            aiSteps[t] = p['firstStep'] as String;
+          }
+          final f = byId[(r['frogId'] as num?)?.toInt()];
+          if (f != null && picked.contains(f)) frog = f;
+        });
+      } on AiException catch (e) {
+        setS(() => aiError = e.message);
+      } finally {
+        setS(() => aiBusy = false);
+      }
+    }
     for (final t in stuck) {
       picked.add(t); // ค่าเริ่มต้นของงานที่ติด: ยังไม่ตัดสินใจ แต่ติ๊กไว้ให้เห็น
     }
@@ -198,6 +247,30 @@ extension _MorningPlan on _HomeScreenState {
             const SizedBox(height: 4),
             Text('ติ๊กงานที่จะทำวันนี้ · กด 🐸 เลือกงานที่ไม่อยากทำที่สุด ทำเป็นอย่างแรก',
               style: TextStyle(fontSize: 11.5, color: _cText.withValues(alpha: .5))),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: aiBusy ? null : () => askAi(setS),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _cGold.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _cGoldDark.withValues(alpha: .4)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (aiBusy)
+                    const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _cGoldDark))
+                  else
+                    const Text('✨', style: TextStyle(fontSize: 13)),
+                  const SizedBox(width: 6),
+                  Text(aiBusy ? 'AI กำลังคิด…' : 'ให้ AI ช่วยเลือก',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _cText)),
+                ]),
+              ),
+            ),
+            if (aiError != null)
+              Padding(padding: const EdgeInsets.only(top: 6),
+                child: Text(aiError!, style: const TextStyle(fontSize: 11.5, color: _cRed))),
             const SizedBox(height: 12),
             Flexible(child: ListView(shrinkWrap: true, children: [
               for (final t in items)
@@ -229,6 +302,11 @@ extension _MorningPlan on _HomeScreenState {
                         ),
                       ),
                     ]),
+                    if (aiNotes[t] != null)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 32, right: 8, bottom: 2),
+                        child: Text('✨ ${aiNotes[t]}', style: TextStyle(fontSize: 11.5, height: 1.35, color: _cText.withValues(alpha: .55))),
+                      ),
                     if (stuck.contains(t))
                       Padding(
                         padding: const EdgeInsets.only(left: 32),
@@ -243,7 +321,7 @@ extension _MorningPlan on _HomeScreenState {
                                 chip('แตกย่อย', () {
                                   setS(() { decided[t] = 'split'; picked.add(t); });
                                   final idx = _tasks.indexOf(t);
-                                  Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(allTasks: _tasks, 
                                     task: t, taskIndex: idx,
                                     onDelete: () { NotificationService.cancel(t.id); _set(() => _tasks.remove(t)); _saveTasks(); _updateWidget(); },
                                     onChanged: () { _saveTasks(); _set(() {}); },
@@ -268,6 +346,7 @@ extension _MorningPlan on _HomeScreenState {
                     if (decided[t] == 'do' || decided[t] == 'split') t.postponeCount = 0;
                     t.plannedFor = picked.contains(t) ? day : null;
                     t.isFrog = frog == t;
+                    if (aiSteps[t] != null && (t.nextAction ?? '').isEmpty) t.nextAction = aiSteps[t];
                   }
                   for (final t in items.where((t) => decided[t] == 'drop')) {
                     NotificationService.cancel(t.id);

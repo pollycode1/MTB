@@ -17,37 +17,61 @@ const kMono       = 'IBM Plex Mono';
 // ── Models ────────────────────────────────────────────────────────────────────
 class SubTask {
   String title;
+  String note;
   bool done;
   final List<SubTask> children;
-  SubTask({required this.title, this.done = false, List<SubTask>? children})
+  SubTask({required this.title, this.note = '', this.done = false, List<SubTask>? children})
       : children = children ?? [];
 
   Map<String, dynamic> toJson() => {
     'title': title, 'done': done,
+    if (note.isNotEmpty) 'note': note,
     'children': children.map((c) => c.toJson()).toList(),
   };
 
   factory SubTask.fromJson(Map<String, dynamic> j) => SubTask(
     title: j['title'] as String,
+    note: j['note'] as String? ?? '',
     done: j['done'] as bool? ?? false,
     children: (j['children'] as List? ?? [])
         .map((c) => SubTask.fromJson(c as Map<String, dynamic>)).toList(),
   );
 }
 
+// ติ๊ก/ยกเลิกขั้นตอน: ขั้นย่อยทั้งหมดตามไปด้วย แล้วปรับขั้นที่สูงกว่าให้ตรงกัน
+void setStepDone(List<SubTask> roots, SubTask s, bool done) {
+  void deep(SubTask x) { x.done = done; x.children.forEach(deep); }
+  deep(s);
+  syncSteps(roots);
+}
+
+// ขั้นที่มีขั้นย่อย = เสร็จเมื่อขั้นย่อยเสร็จครบ (คิดจากล่างขึ้นบน)
+void syncSteps(List<SubTask> list) {
+  for (final s in list) {
+    if (s.children.isEmpty) continue;
+    syncSteps(s.children);
+    s.done = s.children.every((c) => c.done);
+  }
+}
+
+int countSteps(List<SubTask> list, {bool onlyDone = false}) =>
+    list.fold(0, (n, s) => n + ((!onlyDone || s.done) ? 1 : 0) + countSteps(s.children, onlyDone: onlyDone));
+
 // type values: 'inbox' | 'task' | 'idea' | 'waiting'
 // recurrence values: 'daily' | 'weekly' | 'monthly' | 'yearly'
 class TaskItem {
   String title, meta;
   bool warn, done;
-  String? tag;
-  Color? tagBg, tagColor;
+  final List<String> tags; // แท็กทั้งหมดของงาน (หลายแท็กได้)
+  Color? tagBg, tagColor; // เลิกใช้แสดงผลแล้ว เก็บไว้ให้ข้อมูลเก่าอ่านได้
+  String? get tag => tags.isEmpty ? null : tags.first;
+  set tag(String? v) { tags.clear(); if (v != null && v.isNotEmpty) tags.add(v); }
   DateTime? doneAt;
   DateTime? deadline;
   String? recurrence;
   String type;       // 'inbox' | 'task' | 'idea' | 'waiting'
   String? nextAction;
-  String? area;      // 'สอน' | 'ส่วนตัว' | 'บ้าน' | null
+  String? area;      // ชื่อหมวดจาก Categories.list (ตั้งค่า → หมวดหมู่) | null
   int priority;      // 1=สูง 2=กลาง 3=ต่ำ
   DateTime? lastUpdatedAt;
   int reviewCount;   // idea resurface counter
@@ -57,6 +81,11 @@ class TaskItem {
   int postponeCount;    // จำนวนครั้งที่ถูกเลื่อน (ดู home_plan.dart / _pickDeadline)
   int? estimateMin;     // เวลาที่คาดว่าจะใช้ (นาที)
   int? actualMin;       // เวลาที่ใช้จริง ถามตอนกดเสร็จ ถ้ามี estimateMin
+  bool aiTodo;          // เพิ่มจาก widget แล้วยังไม่ได้ให้ AI จัดหมวด/ความสำคัญ
+  final List<String> attachments; // ไฟล์แนบ: path สัมพัทธ์ใน Attachments.rootPath
+  DateTime? slotStart; // ลงเวลาในตาราง (วัน+เวลาเริ่ม)
+  int slotMin;         // ระยะเวลาในตาราง (นาที)
+  final DateTime createdAt; // ใช้เรียงงานใหม่ไว้บนสุด (ข้อมูลเก่าไม่มี = ถือว่าเก่าที่สุด)
   final List<SubTask> subTasks;
   // รหัสประจำงาน — ใช้เป็น notification id และ key ของ UI แทนลำดับในลิสต์
   final int id;
@@ -75,7 +104,8 @@ class TaskItem {
     this.meta = '',
     this.warn = false,
     this.done = false,
-    this.tag,
+    String? tag,
+    List<String>? tags,
     this.tagBg,
     this.tagColor,
     this.doneAt,
@@ -93,8 +123,16 @@ class TaskItem {
     this.postponeCount = 0,
     this.estimateMin,
     this.actualMin,
+    this.aiTodo = false,
+    DateTime? createdAt,
+    this.slotStart,
+    this.slotMin = 60,
+    List<String>? attachments,
     List<SubTask>? subTasks,
   }) : id = id ?? _genId(),
+       tags = tags ?? [if (tag != null && tag.isNotEmpty) tag],
+       createdAt = createdAt ?? DateTime.now(),
+       attachments = attachments ?? [],
        subTasks = subTasks ?? [];
 
   Map<String, dynamic> toJson() => {
@@ -103,7 +141,8 @@ class TaskItem {
     'meta': meta,
     'warn': warn,
     'done': done,
-    'tag': tag,
+    'tag': tag, // แท็กแรก ให้ widget/ข้อมูลเก่าอ่านได้
+    'tags': tags,
     'tagBg': tagBg?.value,
     'tagColor': tagColor?.value,
     'doneAt': doneAt?.toIso8601String(),
@@ -121,6 +160,11 @@ class TaskItem {
     'postponeCount': postponeCount,
     'estimateMin': estimateMin,
     'actualMin': actualMin,
+    if (aiTodo) 'aiTodo': true,
+    'createdAt': createdAt.toIso8601String(),
+    if (slotStart != null) 'slotStart': slotStart!.toIso8601String(),
+    if (slotStart != null) 'slotMin': slotMin,
+    if (attachments.isNotEmpty) 'attachments': attachments,
     'subTasks': subTasks.map((s) => s.toJson()).toList(),
   };
 
@@ -130,7 +174,7 @@ class TaskItem {
     meta: j['meta'] as String? ?? '',
     warn: j['warn'] as bool? ?? false,
     done: j['done'] as bool? ?? false,
-    tag: j['tag'] as String?,
+    tags: (j['tags'] as List?)?.cast<String>().toList() ?? [if (j['tag'] is String && (j['tag'] as String).isNotEmpty) j['tag'] as String],
     tagBg: j['tagBg'] != null ? Color(j['tagBg'] as int) : null,
     tagColor: j['tagColor'] != null ? Color(j['tagColor'] as int) : null,
     doneAt: j['doneAt'] != null ? DateTime.tryParse(j['doneAt'] as String) : null,
@@ -148,6 +192,11 @@ class TaskItem {
     postponeCount: j['postponeCount'] as int? ?? 0,
     estimateMin: (j['estimateMin'] as num?)?.toInt(),
     actualMin: (j['actualMin'] as num?)?.toInt(),
+    aiTodo: j['aiTodo'] as bool? ?? false,
+    createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime(2000),
+    slotStart: j['slotStart'] != null ? DateTime.tryParse(j['slotStart'] as String) : null,
+    slotMin: (j['slotMin'] as num?)?.toInt() ?? 60,
+    attachments: (j['attachments'] as List?)?.cast<String>().toList(),
     subTasks: (j['subTasks'] as List? ?? [])
         .map((s) => SubTask.fromJson(s as Map<String, dynamic>)).toList(),
   );

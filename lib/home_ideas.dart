@@ -2,6 +2,49 @@ part of 'home_screen.dart';
 
 extension _IdeasTab on _HomeScreenState {
   // ── Idea tab ───────────────────────────────────────────────────────────────────
+  void _ideaMenu(TaskItem t) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 24),
+        decoration: const BoxDecoration(color: _cSurf, borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Text(t.title, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _cText)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.ios_share_rounded, color: _cText),
+            title: const Text('แชร์ข้อมูลทั้งหมด (JSON)', style: TextStyle(fontSize: 14.5, color: _cText)),
+            subtitle: Text('รวมขั้นตอนย่อย แท็ก หมายเหตุ และไฟล์แนบ', style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .45))),
+            onTap: () { Navigator.pop(ctx); shareTask(t); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.sell_outlined, color: _cGoldDark),
+            title: const Text('ให้ AI ติดแท็ก', style: TextStyle(fontSize: 14.5, color: _cText)),
+            onTap: () { Navigator.pop(ctx); _aiTag(t); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.task_alt_rounded, color: _cGreenDark),
+            title: const Text('ย้ายเป็นงาน', style: TextStyle(fontSize: 14.5, color: _cText)),
+            subtitle: Text('เป็นงานของวันนี้', style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .45))),
+            onTap: () {
+              Navigator.pop(ctx);
+              final n = DateTime.now();
+              _set(() { t.type = 'task'; t.reviewCount = 0; t.lastUpdatedAt = n; t.plannedFor = DateTime(n.year, n.month, n.day); });
+              NotificationService.scheduleDeadline(t.id, t);
+              _saveTasks();
+              _updateWidget();
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
   Widget _ideaContent() {
     final indices = _ideaIdx;
     if (indices.isEmpty) {
@@ -15,30 +58,10 @@ extension _IdeasTab on _HomeScreenState {
       const SizedBox(height: 10),
       ...indices.map((i) {
         final t = _tasks[i];
-        final resurface = t.reviewCount >= 3;
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (resurface)
-            Container(
-              margin: const EdgeInsets.only(bottom: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(color: _cGreen.withValues(alpha: .12), borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _cGreen.withValues(alpha: .3))),
-              child: Row(children: [
-                Icon(Icons.auto_awesome, size: 13, color: _cGreen),
-                const SizedBox(width: 6),
-                Expanded(child: Text('สนใจมา 3 รอบแล้ว — แปลงเป็น task?',
-                  style: TextStyle(fontSize: 12, color: _cGreen, fontWeight: FontWeight.w600))),
-                GestureDetector(
-                  onTap: () {
-                    _set(() { t.type = 'task'; t.meta = ''; t.reviewCount = 0; t.lastUpdatedAt = DateTime.now(); });
-                    _saveTasks();
-                  },
-                  child: Text('แปลง ✓', style: TextStyle(fontSize: 11, color: _cGreen, fontWeight: FontWeight.w700)),
-                ),
-              ]),
-            ),
           GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
+            onLongPress: () => _ideaMenu(t), // กดค้าง = ให้ AI ติดแท็ก / ย้ายเป็นงาน
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(allTasks: _tasks, 
               task: t,
               taskIndex: i,
               onDelete: () { NotificationService.cancel(t.id); _set(() => _tasks.remove(t)); _saveTasks(); _updateWidget(); },
@@ -50,28 +73,18 @@ extension _IdeasTab on _HomeScreenState {
             decoration: BoxDecoration(
               color: _cSurf,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: resurface ? _cGreen.withValues(alpha: .25) : _cGold.withValues(alpha: .15)),
+              border: Border.all(color: _cGold.withValues(alpha: .15)),
             ),
             child: Row(children: [
               Icon(Icons.lightbulb_outline, size: 16, color: _cGoldDark),
               const SizedBox(width: 10),
-              Expanded(child: Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _cText))),
-              // ยังสนใจอยู่ — นับ review
-              GestureDetector(
-                onTap: () {
-                  _set(() { t.reviewCount++; t.lastUpdatedAt = DateTime.now(); });
-                  _saveTasks();
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text('★', style: TextStyle(fontSize: 13,
-                    color: t.reviewCount > 0 ? _cGoldDark : _cText.withValues(alpha: .25))),
-                ),
-              ),
-              GestureDetector(
-                onTap: () { _set(() => _tasks[i].type = 'inbox'); _saveTasks(); _set(() => _tabIdx = 0); },
-                child: Text('→ inbox', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGoldDark)),
-              ),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _cText)),
+                if (t.tags.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(t.tags.map((x) => '#$x').join('  '), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGoldDark)),
+                ],
+              ])),
               const SizedBox(width: 10),
               GestureDetector(
                 onTap: () {

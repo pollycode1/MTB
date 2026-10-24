@@ -6,12 +6,13 @@ import android.content.ComponentName
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.ViewTreeObserver
+import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
 import android.view.WindowManager
-import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -21,8 +22,6 @@ import org.json.JSONObject
 
 class AddTaskActivity : Activity() {
 
-    private lateinit var sheetView: View
-    private lateinit var dimView2: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,7 +88,7 @@ class AddTaskActivity : Activity() {
             setOnEditorActionListener { _, _, _ ->
                 val t = text.toString().trim()
                 if (t.isNotEmpty()) saveTask(t)
-                dismissWithAnimation(); true
+                dismiss(); true
             }
         }
 
@@ -99,7 +98,7 @@ class AddTaskActivity : Activity() {
             textSize = 14f
             setTextColor(Color.parseColor("#55E2E2E2"))
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            setOnClickListener { dismissWithAnimation() }
+            setOnClickListener { dismiss() }
         })
         btnRow.addView(TextView(this).apply {
             text = "เพิ่ม"
@@ -119,7 +118,7 @@ class AddTaskActivity : Activity() {
             setOnClickListener {
                 val t = input.text.toString().trim()
                 if (t.isNotEmpty()) saveTask(t)
-                dismissWithAnimation()
+                dismiss()
             }
         })
 
@@ -128,11 +127,10 @@ class AddTaskActivity : Activity() {
         sheet.addView(input)
         sheet.addView(btnRow)
 
-        // ── Root: dim | sheet | keyboardSpacer ───────────────────────────────
+        // ── Root: พื้นที่แตะเพื่อปิด | sheet | keyboardSpacer ─────────────────────
+        // ไม่มีพื้นหลังมืด/เฟด — มีแค่ sheet เลื่อนขึ้นอย่างเดียว
         val dimView = View(this).apply {
-            setBackgroundColor(Color.parseColor("#80000000"))
-            alpha = 0f
-            setOnClickListener { dismissWithAnimation() }
+            setOnClickListener { dismiss() }
         }
         val keyboardSpacer = View(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -141,42 +139,53 @@ class AddTaskActivity : Activity() {
         root.addView(keyboardSpacer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0))
 
         setContentView(root)
-        overridePendingTransition(0, 0)
-
-        // Slide up from bottom
-        sheet.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                sheet.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                sheet.translationY = sheet.height.toFloat()
-                sheet.animate().translationY(0f).setDuration(300)
-                    .setInterpolator(DecelerateInterpolator(1.5f)).start()
-                dimView.animate().alpha(1f).setDuration(250).start()
-            }
-        })
-
-        // Keyboard spacer
-        root.viewTreeObserver.addOnGlobalLayoutListener {
-            val rect = Rect()
-            root.getWindowVisibleDisplayFrame(rect)
-            val kbHeight = maxOf(0, root.height - rect.bottom)
-            val lp = keyboardSpacer.layoutParams as LinearLayout.LayoutParams
-            if (lp.height != kbHeight) { lp.height = kbHeight; keyboardSpacer.requestLayout() }
+        if (Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            overridePendingTransition(0, 0)
         }
 
-        this.sheetView = sheet
-        this.dimView2  = dimView
+        // Keyboard spacer
+        fun setSpacer(h: Int) {
+            val lp = keyboardSpacer.layoutParams as LinearLayout.LayoutParams
+            if (lp.height != h) { lp.height = h; keyboardSpacer.requestLayout() }
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            // ขยับตามคีย์บอร์ดทีละเฟรม (ไม่กระตุกตอนคีย์บอร์ดเด้งขึ้น/ลง)
+            window.setDecorFitsSystemWindows(false)
+            val bottomTypes = WindowInsets.Type.ime() or WindowInsets.Type.navigationBars()
+            var animating = false
+            root.setOnApplyWindowInsetsListener { _, insets ->
+                if (!animating) setSpacer(insets.getInsets(bottomTypes).bottom)
+                insets
+            }
+            root.setWindowInsetsAnimationCallback(object : WindowInsetsAnimation.Callback(DISPATCH_MODE_STOP) {
+                override fun onPrepare(animation: WindowInsetsAnimation) { animating = true }
+                override fun onProgress(insets: WindowInsets, running: MutableList<WindowInsetsAnimation>): WindowInsets {
+                    setSpacer(insets.getInsets(bottomTypes).bottom)
+                    return insets
+                }
+                override fun onEnd(animation: WindowInsetsAnimation) { animating = false; root.requestApplyInsets() }
+            })
+        } else {
+            root.viewTreeObserver.addOnGlobalLayoutListener {
+                val rect = Rect()
+                root.getWindowVisibleDisplayFrame(rect)
+                setSpacer(maxOf(0, root.height - rect.bottom))
+            }
+        }
+
     }
 
-    private fun dismissWithAnimation() {
-        sheetView.animate().translationY(sheetView.height.toFloat())
-            .setDuration(240).setInterpolator(DecelerateInterpolator()).start()
-        dimView2.animate().alpha(0f).setDuration(200).withEndAction {
-            finish(); overridePendingTransition(0, 0)
-        }.start()
+    // ไม่มีอนิเมชั่น — sheet โผล่/หายทันที
+    private fun dismiss() {
+        finish()
+        if (Build.VERSION.SDK_INT < 34) overridePendingTransition(0, 0)
     }
 
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { dismissWithAnimation() }
+    override fun onBackPressed() { dismiss() }
 
     private fun saveTask(title: String) {
         val flutterPrefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
@@ -188,10 +197,13 @@ class AddTaskActivity : Activity() {
             val today = String.format("%04d-%02d-%02dT00:00:00",
                 cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
             list.put(JSONObject().apply {
+                put("id", MtbTasksWidget.newId(list)) // มี id ตั้งแต่แรก widget จะได้ติ๊ก/เปิดงานนี้ได้ก่อนเปิดแอพ
                 put("title", title); put("meta", "")
                 put("done", false);  put("warn", false)
                 put("type", "task")
                 put("plannedFor", today)
+                put("createdAt", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date()))
+                put("aiTodo", true) // ให้แอพส่งให้ AI จัดหมวด/ความสำคัญตอนเปิดครั้งถัดไป
                 put("doneAt", JSONObject.NULL)
                 put("tag", JSONObject.NULL); put("tagBg", JSONObject.NULL); put("tagColor", JSONObject.NULL)
             })

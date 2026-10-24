@@ -8,6 +8,8 @@ class NotificationService {
   static bool _ready = false;
   // HomeScreen ตั้งไว้ให้เปิดหน้าสรุปสัปดาห์เมื่อกดแจ้งเตือนรีวิว
   static void Function()? onWeeklyTap;
+  static void Function()? onPlanTap;
+  static const planReminderHour = 7; // เตือนวางแผนทุกวัน 07:00
 
   static Future<void> init() async {
     tz.initializeTimeZones();
@@ -16,6 +18,7 @@ class NotificationService {
       const InitializationSettings(android: android),
       onDidReceiveNotificationResponse: (r) {
         if (r.payload == 'weekly') onWeeklyTap?.call();
+        if (r.payload == 'plan') onPlanTap?.call();
       },
     );
     await _plugin
@@ -24,10 +27,10 @@ class NotificationService {
     _ready = true;
   }
 
-  // แอพถูกเปิดจากการกดแจ้งเตือนรีวิวรายสัปดาห์ตอนปิดอยู่หรือไม่
-  static Future<bool> launchedFromWeekly() async {
+  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | null)
+  static Future<String?> launchPayload() async {
     final d = await _plugin.getNotificationAppLaunchDetails();
-    return d?.didNotificationLaunchApp == true && d?.notificationResponse?.payload == 'weekly';
+    return d?.didNotificationLaunchApp == true ? d?.notificationResponse?.payload : null;
   }
 
   // priority 1=สูง → แจ้ง 24h+1h ก่อน, 2=กลาง → 3h ก่อน, 3=ต่ำ → 1h ก่อน
@@ -84,8 +87,10 @@ class NotificationService {
     await _plugin.cancelAll();
   }
 
+  // ตั้งแจ้งเตือนประจำ 2 อย่าง: รีวิวรายสัปดาห์ (9999) และวางแผนทุกเช้า (9998)
   static Future<void> scheduleWeeklyReview() async {
     if (!_ready) return;
+    await _schedulePlanReminder();
     await _plugin.cancel(9999);
     final now = DateTime.now();
     final daysUntil = (7 - now.weekday) % 7;
@@ -108,6 +113,31 @@ class NotificationService {
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
       payload: 'weekly',
+    );
+  }
+
+  static Future<void> _schedulePlanReminder() async {
+    await _plugin.cancel(9998);
+    final now = DateTime.now();
+    var next = DateTime(now.year, now.month, now.day, planReminderHour);
+    if (!next.isAfter(now)) next = next.add(const Duration(days: 1));
+    await _plugin.zonedSchedule(
+      9998,
+      'วางแผนวันนี้',
+      'เลือกงานที่จะทำวันนี้ และงานกบ 🐸',
+      tz.TZDateTime.from(next, tz.local),
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'plan_reminder', 'วางแผนทุกเช้า',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.time,
+      payload: 'plan',
     );
   }
 }

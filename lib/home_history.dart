@@ -69,6 +69,34 @@ extension _ArchiveHistoryTab on _HomeScreenState {
       ..sort((a, b) => b.doneAt!.compareTo(a.doneAt!));
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // งานเดือนเดียวกันของปีที่แล้ว → เลือกมาทำซ้ำเป็นงานใหม่
+      GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LastYearScreen(
+          tasks: _tasks,
+          onAdd: (fresh) {
+            _set(() => _tasks.addAll(fresh));
+            for (final t in fresh) { NotificationService.scheduleDeadline(t.id, t); }
+            _saveTasks();
+            _updateWidget();
+          },
+        ))).then((_) => _set(() {})),
+        child: Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: _cSurf,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _cGoldDark.withValues(alpha: .35)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.history_rounded, size: 18, color: _cGoldDark),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('งานเดือนนี้ของปีที่แล้ว', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _cText))),
+            Text('เลือกมาทำซ้ำ ›', style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .45))),
+          ]),
+        ),
+      ),
       SizedBox(
         height: 36,
         child: ListView.separated(
@@ -135,10 +163,8 @@ extension _ArchiveHistoryTab on _HomeScreenState {
           const SizedBox(height: 2),
           Text(timeStr, style: TextStyle(fontSize: 10.5, color: _cText.withValues(alpha: .38))),
         ])),
-        if (t.tag != null)
-          Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: t.tagBg, borderRadius: BorderRadius.circular(999)),
-            child: Text(t.tag!, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: t.tagColor))),
+        if (t.tags.isNotEmpty)
+          Text(t.tags.map((x) => '#$x').join(' '), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _cGoldDark)),
       ]),
     );
   }

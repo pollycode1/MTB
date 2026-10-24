@@ -7,6 +7,14 @@ import 'models.dart';
 import 'task_detail_screen.dart';
 import 'settings_screen.dart';
 import 'weekly_summary_screen.dart';
+import 'ai_service.dart';
+import 'backup.dart';
+import 'categories.dart';
+import 'tags.dart';
+import 'search_screen.dart';
+import 'share_task.dart';
+import 'last_year_screen.dart';
+import 'schedule_screen.dart';
 import 'notification_service.dart';
 part 'home_today.dart';
 part 'home_inbox.dart';
@@ -36,15 +44,15 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   bool _entered = false;
-  String _period = 'today'; // ตัวกรองแท็บงาน: today | week | month | all
+  final Set<int> _aiBusy = {}; // id ของรายการในกล่องรับที่ AI กำลังจัดให้
+  String _tagFilter = ''; // '' = ทุกแท็ก
+  String _period = 'all'; // ตัวกรองแท็บงาน: all | today | week | month (เปิดแอพมาเห็นทั้งหมดก่อน)
   int _tabIdx = 0;
   String _historyFilter = 'เดือนนี้';
   String _areaFilter = '';
-  String? _pendingIdeaTitle;
-  String? _pendingTaskTitle;
+  int? _pendingOpenId; // widget สั่งเปิดงานก่อนโหลดงานเสร็จ
   bool _tasksLoaded = false;
 
-  final Set<int> _expandedCards = {};
   final List<TaskItem> _tasks = [
     TaskItem(title: 'เตรียมสื่อการสอนคณิต', meta: 'เสร็จ 08:12 · เร็วกว่ากำหนด 48 นาที', done: true),
     TaskItem(title: 'ตรวจใบงาน ป.4 (18 ชุด)', meta: 'เลื่อนมาแล้ว 2 ครั้ง', warn: true,
@@ -66,24 +74,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     NotificationService.scheduleWeeklyReview();
     _loadSettings();
     NotificationService.onWeeklyTap = _openWeeklySummary;
+    NotificationService.onPlanTap = _openMorningPlan;
     _loadTasks().then((_) async {
       _tasksLoaded = true;
+      Tags.mergeFrom(_tasks);
+      AutoBackup.run(_tasks);
+      if (await AiService.hasKey()) {
+        for (final t in _tasks.where((t) => t.aiTodo).toList()) {
+          _aiTriage(t);
+        }
+      }
       // เปิดจากแจ้งเตือนรีวิวรายสัปดาห์ → ไปหน้าสรุปก่อน แทนแผนเช้า
-      if (await NotificationService.launchedFromWeekly()) {
+      final launch = await NotificationService.launchPayload();
+      if (launch == 'weekly') {
         _openWeeklySummary();
+      } else if (launch == 'plan') {
+        _openMorningPlan();
       } else {
         _maybeShowMorningPlan();
       }
       Future.delayed(const Duration(milliseconds: 500), _updateWidget);
-      if (_pendingTaskTitle != null) {
-        final t = _pendingTaskTitle!;
-        _pendingTaskTitle = null;
-        _openIdeaByTitle(t, type: 'task');
-      }
-      if (_pendingIdeaTitle != null) {
-        final t = _pendingIdeaTitle!;
-        _pendingIdeaTitle = null;
-        _openIdeaByTitle(t);
+      if (_pendingOpenId != null) {
+        _openFromWidget(_pendingOpenId!);
+        _pendingOpenId = null;
       }
     });
     HomeWidget.initiallyLaunchedFromHomeWidget().then(_handleWidgetLaunch);
@@ -102,6 +115,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     await prefs.setString('settings_name', name);
   }
 
+  Future<void> _openTaskDetail(TaskItem t) => Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
+    allTasks: _tasks,
+    task: t,
+    taskIndex: _tasks.indexOf(t),
+    onDelete: () {
+      NotificationService.cancel(t.id);
+      setState(() => _tasks.remove(t));
+      _saveTasks();
+      _updateWidget();
+    },
+    onChanged: () { _saveTasks(); _updateWidget(); setState(() {}); },
+  ))).then((_) { if (mounted) setState(() {}); });
+
+  void _openSchedule() {
+    if (!mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ScheduleScreen(
+      tasks: _tasks,
+      onAdd: (t) {
+        _set(() => _tasks.add(t));
+        _saveTasks();
+        _updateWidget();
+        AiService.hasKey().then((k) { if (k && mounted) _aiTag(t); }); // ติดแท็กให้ (ไม่ย้ายประเภท/เวลา)
+      },
+      onOpen: _openTaskDetail,
+      onToggle: (t) { final i = _tasks.indexOf(t); if (i >= 0) _toggle(i); },
+    ))).then((_) { if (mounted) setState(() {}); });
+  }
+
+  void _openSearch() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => SearchScreen(tasks: _tasks, onOpen: _openTaskDetail)))
+        .then((_) { if (mounted) setState(() {}); });
+  }
+
   void _openWeeklySummary() {
     if (!mounted) return;
     Navigator.push(context, MaterialPageRoute(builder: (_) => WeeklySummaryScreen(tasks: _tasks)));
@@ -111,6 +157,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(
       tasks: _tasks,
       userName: _userName,
+      onTasksChanged: () {
+        _set(() { if (_areaFilter.isNotEmpty && !Categories.list.contains(_areaFilter)) _areaFilter = ''; });
+        _saveTasks();
+        _updateWidget();
+      },
+      onImport: (restored) {
+        _set(() {
+          _tasks
+            ..clear()
+            ..addAll(restored);
+        });
+        _migrateNotificationIds(); // ตั้งแจ้งเตือนใหม่ทั้งหมด + บันทึก
+        _updateWidget();
+      },
       onSave: (name, clearedAll) {
         setState(() {
           _userName   = name;
@@ -151,6 +211,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             ..addAll(list.map((j) => TaskItem.fromJson(j as Map<String, dynamic>)));
         });
       }
+      // ข้อมูลเก่าเคยใส่คำว่า "inbox" เป็นหมายเหตุ → ล้างให้ว่าง
+      for (final t in _tasks) {
+        if (t.meta == 'inbox') t.meta = '';
+      }
       // งานเก่า (หรือที่เพิ่มจากวิดเจ็ต) ยังไม่มี id → บันทึกและตั้งการแจ้งเตือนใหม่ทั้งหมด
       if (missingId) await _migrateNotificationIds();
     } catch (_) {
@@ -176,10 +240,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       // waiting escalation: 7 วันไม่มีการอัปเดต → ติดตาม
       if (t.type == 'waiting') {
         final last = t.lastUpdatedAt ?? t.doneAt ?? now;
-        if (now.difference(last).inDays >= 7 && t.tag != 'ติดตาม') {
-          t.tag = 'ติดตาม';
-          t.tagBg = const Color(0x33D8A93F);
-          t.tagColor = kCGoldDark;
+        if (now.difference(last).inDays >= 7 && !t.tags.contains('ติดตาม')) {
+          t.tags.add('ติดตาม');
           changed = true;
         }
       }
@@ -205,8 +267,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _loadTasks().then((_) => _updateWidget());
+    } else if (state == AppLifecycleState.paused && _tasksLoaded) {
+      AutoBackup.run(_tasks); // สลับออกจากแอพ → อัปเดตไฟล์สำรองของวันนี้
     }
   }
+
+  List<String> get _allTags => Tags.list;
 
   // active tasks (type=task, not done) — used for widget count
   List<int> get _pendingIdx => List.generate(_tasks.length, (i) => i)
@@ -222,66 +288,47 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   List<int> get _archivedIdx => List.generate(_tasks.length, (i) => i)
       .where((i) => _tasks[i].archivedAt != null).toList();
   List<int> get _escalatedWaitingIdx => List.generate(_tasks.length, (i) => i)
-      .where((i) => _tasks[i].type == 'waiting' && _tasks[i].tag == 'ติดตาม' && !_tasks[i].done && _tasks[i].archivedAt == null).toList();
+      .where((i) => _tasks[i].type == 'waiting' && _tasks[i].tags.contains('ติดตาม') && !_tasks[i].done && _tasks[i].archivedAt == null).toList();
 
-  void _openIdeaByTitle(String title, {String type = 'idea'}) {
+  void _openFromWidget(int id) {
     // ponytail: search after delay so _loadTasks() from didChangeAppLifecycleState can finish first
     Future.delayed(const Duration(milliseconds: 400), () {
       if (!mounted) return;
-      final idx = _tasks.indexWhere((t) => t.type == type && t.title == title);
-      if (idx < 0) return;
-      setState(() => _tabIdx = type == 'idea' ? 2 : 0);
-      Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(
-        task: _tasks[idx],
-        taskIndex: idx,
-        onDelete: () {
-          NotificationService.cancel(_tasks[idx].id);
-          setState(() => _tasks.removeAt(idx));
-          _saveTasks();
-          _updateWidget();
-        },
-        onChanged: () { _saveTasks(); _updateWidget(); setState(() {}); },
-      ))).then((_) => setState(() {}));
+      final t = _tasks.where((t) => t.id == id).firstOrNull;
+      if (t == null) return;
+      setState(() => _tabIdx = t.type == 'idea' ? 2 : 0);
+      _openTaskDetail(t);
     });
   }
 
   void _handleWidgetLaunch(Uri? uri) {
     if (uri == null || !mounted) return;
+    final id = int.tryParse(uri.queryParameters['id'] ?? ''); // TaskItem.id จาก widget
     switch (uri.host) {
       case 'add':
         Future.delayed(const Duration(milliseconds: 400), () { if (mounted) _openInput(); });
-      case 'toggle':
-        final idx = int.tryParse(uri.pathSegments.firstOrNull ?? '');
-        if (idx != null && idx < _tasks.length) _toggle(idx);
-      case 'task':
-        setState(() => _tabIdx = 0);
-        final taskTitle = uri.queryParameters['t'];
-        if (taskTitle != null && taskTitle.isNotEmpty) {
+      case 'task' || 'idea':
+        setState(() => _tabIdx = uri.host == 'idea' ? 2 : 0);
+        if (id != null) {
           if (_tasksLoaded) {
-            _openIdeaByTitle(taskTitle, type: 'task');
+            _openFromWidget(id);
           } else {
-            _pendingTaskTitle = taskTitle;
+            _pendingOpenId = id;
           }
         }
-      case 'idea':
-        setState(() => _tabIdx = 2);
-        final title = uri.queryParameters['t'];
-        if (title != null && title.isNotEmpty) {
-          if (_tasksLoaded) _openIdeaByTitle(title);
-          else _pendingIdeaTitle = title;
-        }
       case 'idea-del':
-        final title = uri.queryParameters['t'];
-        if (title != null && title.isNotEmpty) {
-          final idx = _tasks.indexWhere((t) => t.type == 'idea' && t.title == title);
-          if (idx >= 0) {
-            NotificationService.cancel(_tasks[idx].id);
-            setState(() => _tasks.removeAt(idx));
+        if (id != null) {
+          final i = _tasks.indexWhere((t) => t.id == id);
+          if (i >= 0) {
+            NotificationService.cancel(id);
+            setState(() => _tasks.removeAt(i));
             _saveTasks();
             _updateWidget();
           }
           SystemNavigator.pop();  // ย่อแอพกลับไป launcher
         }
+      case 'schedule': // ปุ่มตารางใน widget
+        Future.delayed(const Duration(milliseconds: 600), _openSchedule);
       case 'open':
         break;
     }
@@ -290,12 +337,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _updateWidget() async {
     await HomeWidget.saveWidgetData('pending_tasks', _pendingIdx.length);
     await HomeWidget.saveWidgetData('total_tasks', _tasks.length);
-    // full task list sorted: pending first, done newest-first
-    final pending = _tasks.where((t) => t.type == 'task' && !t.done).toList();
-    final done = _tasks.where((t) => t.type == 'task' && t.done).toList()
-      ..sort((a, b) => (b.doneAt ?? DateTime(0)).compareTo(a.doneAt ?? DateTime(0)));
-    final sorted = [...pending, ...done, ..._tasks.where((t) => t.type != 'task')];
-    final tasksJson = jsonEncode(sorted.map((t) => t.toJson()).toList());
+    // ลำดับเดียวกับ flutter.tasks_json — widget ติ๊กงานตามดัชนี ห้ามเรียงใหม่ที่นี่ (Kotlin เรียงตอนแสดงเอง)
+    final tasksJson = jsonEncode(_tasks.map((t) => t.toJson()).toList());
     await HomeWidget.saveWidgetData('tasks_json', tasksJson);
     await HomeWidget.updateWidget(androidName: 'MtbTasksWidget');
   }
@@ -308,12 +351,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         t.doneAt = DateTime.now();
         NotificationService.cancel(t.id);
         // auto-create next occurrence for recurring tasks
-        if (t.recurrence != null && t.deadline != null) {
-          final next = _nextDeadline(t.deadline!, t.recurrence!);
+        if (t.recurrence != null && (t.deadline != null || t.slotStart != null)) {
+          final next = t.deadline == null ? null : _nextDeadline(t.deadline!, t.recurrence!);
+          final nextSlot = t.slotStart == null ? null : _nextDeadline(t.slotStart!, t.recurrence!);
           final clone = TaskItem(
             title: t.title, meta: t.meta, warn: t.warn,
-            tag: t.tag, tagBg: t.tagBg, tagColor: t.tagColor,
+            tags: [...t.tags],
             deadline: next, recurrence: t.recurrence,
+            slotStart: nextSlot, slotMin: t.slotMin,
+            plannedFor: nextSlot == null ? null : DateTime(nextSlot.year, nextSlot.month, nextSlot.day),
             priority: t.priority, area: t.area, nextAction: t.nextAction,
             lastUpdatedAt: DateTime.now(),
           );
@@ -455,6 +501,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         Text('เหลือ $remaining งาน', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: _cText)),
       ]),
       Row(children: [
+        GestureDetector(
+          onTap: _openSchedule,
+          child: Container(
+            width: 36, height: 36,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: _cText.withValues(alpha: .07),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(Icons.calendar_view_week_rounded, size: 18, color: _cText.withValues(alpha: .55)),
+          ),
+        ),
+        GestureDetector(
+          onTap: _openSearch,
+          child: Container(
+            width: 36, height: 36,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: _cText.withValues(alpha: .07),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(Icons.search_rounded, size: 18, color: _cText.withValues(alpha: .55)),
+          ),
+        ),
         GestureDetector(
           onTap: _openWeeklySummary,
           child: Container(
