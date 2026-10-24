@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'ai_service.dart';
 import 'attachments.dart';
 import 'backup.dart';
@@ -195,6 +196,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             // ── Backup ─────────────────────────────────────────────────────
             _sectionLabel('สำรองข้อมูล'),
             _card(child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Text('สำรองอัตโนมัติวันละไฟล์ (รวมไฟล์แนบ) เก็บ 7 วันล่าสุดที่:\n'
+                    '${AutoBackup.lastPath ?? '${AutoBackup.publicDir}/'}',
+                  style: TextStyle(fontSize: 11.5, color: kCText.withValues(alpha: .45))),
+              ),
+              _actionRow(
+                icon: Icons.file_open_outlined,
+                label: 'กู้คืนจากไฟล์สำรอง (แทนที่งานทั้งหมด)',
+                color: kCText,
+                done: false,
+                onTap: () async {
+                  final picked = await FilePicker.pickFiles();
+                  if (picked.isEmpty) return;
+                  await _restore(await picked.first.xFile.readAsString());
+                },
+              ),
+              _divider(),
               _actionRow(
                 icon: Icons.copy_all_rounded,
                 label: 'คัดลอกข้อมูลสำรอง (วางเก็บไว้ในโน้ตได้)',
@@ -214,21 +233,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 label: 'กู้คืนจากคลิปบอร์ด (แทนที่งานทั้งหมด)',
                 color: kCText,
                 done: false,
-                onTap: () async {
-                  final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
-                  final restored = parseBackup(text);
-                  if (!mounted) return;
-                  if (restored == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('ในคลิปบอร์ดไม่ใช่ข้อมูลสำรองของ MTB')));
-                    return;
-                  }
-                  final ok = await _confirm('กู้คืนข้อมูล?', 'งานปัจจุบัน $_totalCnt รายการจะถูกแทนที่ด้วย ${restored.length} รายการจากข้อมูลสำรอง');
-                  if (ok && mounted) {
-                    widget.onImport(restored);
-                    Navigator.pop(context);
-                  }
-                },
+                onTap: () async =>
+                    _restore((await Clipboard.getData(Clipboard.kTextPlain))?.text ?? ''),
               ),
             ])),
             const SizedBox(height: 20),
@@ -305,6 +311,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ]),
     ),
   );
+
+  Future<void> _restore(String text) async {
+    final restored = parseBackup(text);
+    if (!mounted) return;
+    if (restored == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ไม่ใช่ข้อมูลสำรองของ MTB')));
+      return;
+    }
+    final ok = await _confirm('กู้คืนข้อมูล?', 'งานปัจจุบัน $_totalCnt รายการจะถูกแทนที่ด้วย ${restored.length} รายการจากข้อมูลสำรอง');
+    if (!ok) return;
+    await AutoBackup.restoreFiles(text);
+    if (!mounted) return;
+    widget.onImport(restored);
+    Navigator.pop(context);
+  }
 
   Future<bool> _confirm(String title, String body) async {
     return await showDialog<bool>(

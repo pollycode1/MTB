@@ -32,6 +32,8 @@ Single-screen Flutter app — no routing library, no state management package. E
 
 **AI (Claude Haiku 5.5)** — `lib/ai_service.dart` calls the Messages API over raw HTTP (`dart:io`, no Dart SDK) with `output_config.format` JSON schemas; the API key is entered in Settings and stored in SharedPreferences (`settings_ai_key`). Entry points: "ให้ AI ช่วยเลือก" in the morning plan (`home_plan.dart`), "✨ AI จัด" on inbox cards (`_aiTriage` in `home_inbox.dart`), "ให้ AI แตกขั้นตอน" in task detail, and "วิเคราะห์สัปดาห์" in the weekly summary. Task titles (including student names) are sent to the API only when the user taps these buttons.
 
+**Backup** — `AutoBackup.run()` (`lib/backup.dart`) runs on load and whenever the app is paused: one file per day, `Download/MTB/mtb-backup-YYYY-MM-DD.json` (overwritten during the day, last 7 kept), with attachments embedded as base64 under `files`. If Download isn't writable it falls back to `<app external>/backups`. Settings restores from a picked file or from the clipboard (the clipboard copy has no attachments).
+
 ## Models (`lib/models.dart`)
 
 - `TaskItem` — serializable to/from JSON, including `id` and `subTasks`.

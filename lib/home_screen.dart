@@ -8,6 +8,7 @@ import 'task_detail_screen.dart';
 import 'settings_screen.dart';
 import 'weekly_summary_screen.dart';
 import 'ai_service.dart';
+import 'backup.dart';
 import 'categories.dart';
 import 'tags.dart';
 import 'search_screen.dart';
@@ -78,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     _loadTasks().then((_) async {
       _tasksLoaded = true;
       Tags.mergeFrom(_tasks);
+      AutoBackup.run(_tasks);
       if (await AiService.hasKey()) {
         for (final t in _tasks.where((t) => t.aiTodo).toList()) {
           _aiTriage(t);
@@ -272,6 +274,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _loadTasks().then((_) => _updateWidget());
+    } else if (state == AppLifecycleState.paused && _tasksLoaded) {
+      AutoBackup.run(_tasks); // สลับออกจากแอพ → อัปเดตไฟล์สำรองของวันนี้
     }
   }
 
