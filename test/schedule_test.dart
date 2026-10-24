@@ -33,6 +33,29 @@ void main() {
     expect(hm(16 * 60 + 30), '16:30');
   });
 
+  test('weekly task landing on a holiday moves to the next school day without drifting', () {
+    Holidays.public = {'2026-10-23': 'วันปิยมหาราช'}; // ศุกร์
+    Holidays.custom = {'2026-10-26': 'หยุดพิเศษ'};     // จันทร์ถัดไป
+    final t = TaskItem(title: 'ส่งงาน', recurrence: 'weekly',
+        deadline: DateTime(2026, 10, 16, 9), slotStart: DateTime(2026, 10, 16, 13));
+
+    // 16 → 23 (ศุกร์หยุด) ข้ามเสาร์อาทิตย์ จันทร์ 26 ก็หยุด → อังคาร 27
+    final n1 = nextOccurrence(t);
+    expect([n1.deadline, n1.slotStart, n1.shift], [DateTime(2026, 10, 27, 9), DateTime(2026, 10, 27, 13), 4]);
+
+    // รอบถัดไปกลับมาวันศุกร์ตามเดิม (30) ไม่ใช่อังคาร
+    final t2 = TaskItem(title: 'ส่งงาน', recurrence: 'weekly', deadline: n1.deadline, slotStart: n1.slotStart, recurShift: n1.shift);
+    final n2 = nextOccurrence(t2);
+    expect([n2.deadline, n2.slotStart, n2.shift], [DateTime(2026, 10, 30, 9), DateTime(2026, 10, 30, 13), 0]);
+
+    // งานรายวัน/รายเดือนไม่เลื่อน · งานเสาร์ที่ไม่ใช่วันหยุดไม่เลื่อน
+    expect(nextOccurrence(TaskItem(title: 'd', recurrence: 'daily', deadline: DateTime(2026, 10, 22))).deadline, DateTime(2026, 10, 23));
+    expect(nextOccurrence(TaskItem(title: 's', recurrence: 'weekly', deadline: DateTime(2026, 10, 17))).deadline, DateTime(2026, 10, 24));
+
+    expect(TaskItem.fromJson(t2.toJson()).recurShift, 4);
+    Holidays.public = {}; Holidays.custom = {};
+  });
+
   test('Thai holiday ics: keeps public holidays only, expands ranges', () {
     const ics = 'BEGIN:VCALENDAR\r\n'
         'BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261023\r\nDTEND;VALUE=DATE:20261024\r\n'

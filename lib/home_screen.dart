@@ -15,6 +15,7 @@ import 'search_screen.dart';
 import 'share_task.dart';
 import 'last_year_screen.dart';
 import 'schedule_screen.dart';
+import 'schedule_data.dart';
 import 'notification_service.dart';
 part 'home_today.dart';
 part 'home_inbox.dart';
@@ -356,12 +357,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         NotificationService.cancel(t.id);
         // auto-create next occurrence for recurring tasks
         if (t.recurrence != null && (t.deadline != null || t.slotStart != null)) {
-          final next = t.deadline == null ? null : _nextDeadline(t.deadline!, t.recurrence!);
-          final nextSlot = t.slotStart == null ? null : _nextDeadline(t.slotStart!, t.recurrence!);
+          final n = nextOccurrence(t); // รายสัปดาห์ที่ตกวันหยุดเลื่อนไปวันเรียนถัดไป
+          final nextSlot = n.slotStart;
           final clone = TaskItem(
             title: t.title, meta: t.meta, warn: t.warn,
             tags: [...t.tags],
-            deadline: next, recurrence: t.recurrence,
+            deadline: n.deadline, recurrence: t.recurrence, recurShift: n.shift,
             slotStart: nextSlot, slotMin: t.slotMin,
             plannedFor: nextSlot == null ? null : DateTime(nextSlot.year, nextSlot.month, nextSlot.day),
             priority: t.priority, area: t.area, nextAction: t.nextAction,
@@ -379,16 +380,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     _saveTasks();
     _updateWidget();
     if (t.done && t.estimateMin != null) _askActualMinutes(t);
-  }
-
-  DateTime _nextDeadline(DateTime from, String recurrence) {
-    switch (recurrence) {
-      case 'daily':   return from.add(const Duration(days: 1));
-      case 'weekly':  return from.add(const Duration(days: 7));
-      case 'monthly': return DateTime(from.year, from.month + 1, from.day, from.hour, from.minute);
-      case 'yearly':  return DateTime(from.year + 1, from.month, from.day, from.hour, from.minute);
-      default:        return from.add(const Duration(days: 1));
-    }
   }
 
   // ── Build ────────────────────────────────────────────────────────────────────
