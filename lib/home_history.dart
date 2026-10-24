@@ -71,15 +71,7 @@ extension _ArchiveHistoryTab on _HomeScreenState {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       // งานเดือนเดียวกันของปีที่แล้ว → เลือกมาทำซ้ำเป็นงานใหม่
       GestureDetector(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LastYearScreen(
-          tasks: _tasks,
-          onAdd: (fresh) {
-            _set(() => _tasks.addAll(fresh));
-            for (final t in fresh) { NotificationService.scheduleDeadline(t.id, t); }
-            _saveTasks();
-            _updateWidget();
-          },
-        ))).then((_) => _set(() {})),
+        onTap: _openLastYear,
         child: Container(
           width: double.infinity,
           margin: const EdgeInsets.only(bottom: 14),
