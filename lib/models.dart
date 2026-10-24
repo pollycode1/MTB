@@ -85,6 +85,7 @@ class TaskItem {
   final List<String> attachments; // ไฟล์แนบ: path สัมพัทธ์ใน Attachments.rootPath
   DateTime? slotStart; // ลงเวลาในตาราง (วัน+เวลาเริ่ม)
   int slotMin;         // ระยะเวลาในตาราง (นาที)
+  int recurShift;      // งานประจำรอบนี้ถูกเลื่อนหนีวันหยุดไปกี่วัน (ใช้คิดรอบถัดไปจากวันเดิม ไม่ให้เลื่อนสะสม)
   final DateTime createdAt; // ใช้เรียงงานใหม่ไว้บนสุด (ข้อมูลเก่าไม่มี = ถือว่าเก่าที่สุด)
   final List<SubTask> subTasks;
   // รหัสประจำงาน — ใช้เป็น notification id และ key ของ UI แทนลำดับในลิสต์
@@ -127,6 +128,7 @@ class TaskItem {
     DateTime? createdAt,
     this.slotStart,
     this.slotMin = 60,
+    this.recurShift = 0,
     List<String>? attachments,
     List<SubTask>? subTasks,
   }) : id = id ?? _genId(),
@@ -164,6 +166,7 @@ class TaskItem {
     'createdAt': createdAt.toIso8601String(),
     if (slotStart != null) 'slotStart': slotStart!.toIso8601String(),
     if (slotStart != null) 'slotMin': slotMin,
+    if (recurShift != 0) 'recurShift': recurShift,
     if (attachments.isNotEmpty) 'attachments': attachments,
     'subTasks': subTasks.map((s) => s.toJson()).toList(),
   };
@@ -196,6 +199,7 @@ class TaskItem {
     createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime(2000),
     slotStart: j['slotStart'] != null ? DateTime.tryParse(j['slotStart'] as String) : null,
     slotMin: (j['slotMin'] as num?)?.toInt() ?? 60,
+    recurShift: (j['recurShift'] as num?)?.toInt() ?? 0,
     attachments: (j['attachments'] as List?)?.cast<String>().toList(),
     subTasks: (j['subTasks'] as List? ?? [])
         .map((s) => SubTask.fromJson(s as Map<String, dynamic>)).toList(),

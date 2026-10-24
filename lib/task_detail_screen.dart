@@ -175,6 +175,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     if (picked == null) return;
     t.slotStart = DateTime(day.year, day.month, day.day, picked ~/ 60, picked % 60);
     t.slotMin = dur;
+    t.recurShift = 0; // ผู้ใช้เลือกวันเอง → ไม่ต้องคิดย้อนการเลื่อนหนีวันหยุด
     t.plannedFor = day;
     _changed();
   }
@@ -205,6 +206,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     final next = DateTime(picked.year, picked.month, picked.day, time?.hour ?? 9, time?.minute ?? 0);
     if (old != null && next.isAfter(old)) widget.task.postponeCount++; // เลื่อนกำหนด = เลื่อน 1 ครั้ง
     widget.task.deadline = next;
+    widget.task.recurShift = 0;
     NotificationService.cancel(widget.task.id);
     NotificationService.scheduleDeadline(widget.task.id, widget.task);
     _changed();

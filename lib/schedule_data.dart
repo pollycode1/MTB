@@ -114,6 +114,35 @@ Map<String, String> parseThaiHolidayIcs(String ics) {
   return out;
 }
 
+// ── รอบถัดไปของงานประจำ ─────────────────────────────────────────────────────────────────
+// รายสัปดาห์ที่ตกวันหยุด → เลื่อนไปวันเรียนถัดไป (จ.–ศ. ที่ไม่ใช่วันหยุด) คงเวลาเดิม
+// รอบถัดไปคิดจากวันเดิมก่อนเลื่อน (deadline - recurShift) จะได้กลับมาวันเดิมของสัปดาห์
+DateTime _addDays(DateTime d, int n) => DateTime(d.year, d.month, d.day + n, d.hour, d.minute);
+
+DateTime _step(DateTime from, String recurrence) => switch (recurrence) {
+  'weekly'  => _addDays(from, 7),
+  'monthly' => DateTime(from.year, from.month + 1, from.day, from.hour, from.minute),
+  'yearly'  => DateTime(from.year + 1, from.month, from.day, from.hour, from.minute),
+  _         => _addDays(from, 1),
+};
+
+({DateTime? deadline, DateTime? slotStart, int shift}) nextOccurrence(TaskItem t) {
+  final r = t.recurrence!;
+  DateTime? next(DateTime? d) => d == null ? null : _step(_addDays(d, -t.recurShift), r);
+  final deadline = next(t.deadline), slot = next(t.slotStart);
+  var shift = 0;
+  final anchor = deadline ?? slot;
+  if (r == 'weekly' && anchor != null && Holidays.nameOn(anchor) != null) {
+    var d = anchor;
+    do { d = _addDays(d, 1); shift++; } while (Holidays.nameOn(d) != null || d.weekday > 5);
+  }
+  return (
+    deadline: deadline == null ? null : _addDays(deadline, shift),
+    slotStart: slot == null ? null : _addDays(slot, shift),
+    shift: shift,
+  );
+}
+
 // ── งานในตาราง: งานที่ทำซ้ำจะโผล่ทุกรอบถัดไปจนกว่าจะติ๊กเสร็จ (ติ๊กแล้วแอพสร้างรอบถัดไปให้เอง) ───────
 bool _recurOn(TaskItem t, DateTime day) {
   final s = dateOnly(t.slotStart!);
