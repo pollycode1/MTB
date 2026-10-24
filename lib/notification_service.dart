@@ -2,6 +2,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'models.dart';
+import 'notif_log.dart';
 import 'schedule_data.dart';
 
 class NotificationService {
@@ -25,6 +26,9 @@ class NotificationService {
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
+    await NotifLog.load();
+    NotifLog.backfillRepeating(DateTime.now(), planHour: planReminderHour);
+    await NotifLog.save();
     _ready = true;
   }
 
@@ -43,6 +47,7 @@ class NotificationService {
     final leadHours = task.priority == 1 ? 24 : task.priority == 3 ? 1 : 3;
     final notifyAt = deadline.subtract(Duration(hours: leadHours));
     if (notifyAt.isAfter(now)) {
+      NotifLog.add(NotifEntry(id, notifyAt, 'กำหนดส่งงานใกล้แล้ว', task.title, taskId: task.id));
       await _plugin.zonedSchedule(
         id,
         'กำหนดส่งงานใกล้แล้ว',
@@ -61,6 +66,7 @@ class NotificationService {
     if (task.priority == 1) {
       final notifyAt1h = deadline.subtract(const Duration(hours: 1));
       if (notifyAt1h.isAfter(now)) {
+        NotifLog.add(NotifEntry(id + 10000, notifyAt1h, '⚠️ งานสำคัญ — ใกล้ถึงกำหนดแล้ว', task.title, taskId: task.id));
         await _plugin.zonedSchedule(
           id + 10000,
           '⚠️ งานสำคัญ — ใกล้ถึงกำหนดแล้ว',
@@ -75,17 +81,22 @@ class NotificationService {
         );
       }
     }
+    await NotifLog.save();
   }
 
   static Future<void> cancel(int id) async {
     if (!_ready) return;
     await _plugin.cancel(id);
     await _plugin.cancel(id + 10000); // priority-1 extra reminder
+    NotifLog.removeFuture((x) => x == id || x == id + 10000);
+    await NotifLog.save();
   }
 
   static Future<void> cancelAll() async {
     if (!_ready) return;
     await _plugin.cancelAll();
+    NotifLog.removeFuture((_) => true);
+    await NotifLog.save();
   }
 
   // ── แจ้งเตือนที่คิดจากข้อมูล (ก่อนคาบ ฯลฯ) id 20000–29999 · ลบของเดิมแล้วตั้งใหม่ทั้งชุด ─────
@@ -97,8 +108,10 @@ class NotificationService {
     for (final p in await _plugin.pendingNotificationRequests()) {
       if (p.id >= _derivedBase && p.id < _derivedBase + 10000) await _plugin.cancel(p.id);
     }
+    NotifLog.removeFuture((x) => x >= _derivedBase && x < _derivedBase + 10000);
     var id = _derivedBase;
     for (final r in classReminders(ScheduleStore.blocks, tasks, DateTime.now())) {
+      NotifLog.add(NotifEntry(id, r.at, r.title, r.body));
       await _plugin.zonedSchedule(
         id++, r.title, r.body,
         tz.TZDateTime.from(r.at, tz.local),
@@ -111,6 +124,7 @@ class NotificationService {
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       );
     }
+    await NotifLog.save();
   }
 
   // ตั้งแจ้งเตือนประจำ 2 อย่าง: รีวิวรายสัปดาห์ (9999) และวางแผนทุกเช้า (9998)

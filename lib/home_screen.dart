@@ -17,12 +17,14 @@ import 'last_year_screen.dart';
 import 'schedule_screen.dart';
 import 'schedule_data.dart';
 import 'notification_service.dart';
+import 'notif_log.dart';
 part 'home_today.dart';
 part 'home_inbox.dart';
 part 'home_ideas.dart';
 part 'home_history.dart';
 part 'home_sheets.dart';
 part 'home_plan.dart';
+part 'home_notifs.dart';
 
 // ── Palette aliases (kept local so no rename needed) ─────────────────────────
 const _cBg        = kCBg;
@@ -142,6 +144,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       NotificationService.rescheduleDerived(_tasks); // ตารางสอนอาจถูกแก้
       if (mounted) setState(() {});
     });
+  }
+
+  void _openLastYear() {
+    if (!mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => LastYearScreen(
+      tasks: _tasks,
+      onAdd: (fresh) {
+        _set(() => _tasks.addAll(fresh));
+        for (final t in fresh) { NotificationService.scheduleDeadline(t.id, t); }
+        _saveTasks();
+        _updateWidget();
+      },
+    ))).then((_) { if (mounted) setState(() {}); });
   }
 
   void _openSearch() {
@@ -268,6 +283,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _loadTasks().then((_) { _updateWidget(); _triageAiTodo(); });
+      NotifLog.backfillRepeating(DateTime.now(), planHour: NotificationService.planReminderHour);
+      NotifLog.save();
     } else if (state == AppLifecycleState.paused && _tasksLoaded) {
       AutoBackup.run(_tasks); // สลับออกจากแอพ → อัปเดตไฟล์สำรองของวันนี้
       NotificationService.rescheduleDerived(_tasks); // เตือนก่อนคาบใช้จำนวนงานค้างล่าสุด
@@ -432,6 +449,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             _ideaContent()
           else if (_tabIdx == 3)
             _historyContent()
+          else if (_tabIdx == 5)
+            _notifContent()
           else
             _archivedContent(),
         ]),
@@ -451,6 +470,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _tabBtn(3, 'ประวัติ'),
         const SizedBox(width: 8),
         _tabBtn(4, 'เก็บถาวร', badge: _archivedIdx.length),
+        const SizedBox(width: 8),
+        _tabBtn(5, 'แจ้งเตือน'),
       ]),
     );
   }
