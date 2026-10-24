@@ -6,11 +6,15 @@ import android.content.ComponentName
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewTreeObserver
+import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
 import android.view.WindowManager
+import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -22,7 +26,6 @@ import org.json.JSONObject
 class AddTaskActivity : Activity() {
 
     private lateinit var sheetView: View
-    private lateinit var dimView2: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -128,10 +131,9 @@ class AddTaskActivity : Activity() {
         sheet.addView(input)
         sheet.addView(btnRow)
 
-        // ── Root: dim | sheet | keyboardSpacer ───────────────────────────────
+        // ── Root: พื้นที่แตะเพื่อปิด | sheet | keyboardSpacer ─────────────────────
+        // ไม่มีพื้นหลังมืด/เฟด — มีแค่ sheet เลื่อนขึ้นอย่างเดียว
         val dimView = View(this).apply {
-            setBackgroundColor(Color.parseColor("#80000000"))
-            alpha = 0f
             setOnClickListener { dismissWithAnimation() }
         }
         val keyboardSpacer = View(this)
@@ -149,30 +151,53 @@ class AddTaskActivity : Activity() {
                 sheet.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 sheet.translationY = sheet.height.toFloat()
                 sheet.animate().translationY(0f).setDuration(300)
-                    .setInterpolator(DecelerateInterpolator(1.5f)).start()
-                dimView.animate().alpha(1f).setDuration(250).start()
+                    .setInterpolator(DecelerateInterpolator(2f)).start()
             }
         })
 
         // Keyboard spacer
-        root.viewTreeObserver.addOnGlobalLayoutListener {
-            val rect = Rect()
-            root.getWindowVisibleDisplayFrame(rect)
-            val kbHeight = maxOf(0, root.height - rect.bottom)
+        fun setSpacer(h: Int) {
             val lp = keyboardSpacer.layoutParams as LinearLayout.LayoutParams
-            if (lp.height != kbHeight) { lp.height = kbHeight; keyboardSpacer.requestLayout() }
+            if (lp.height != h) { lp.height = h; keyboardSpacer.requestLayout() }
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            // ขยับตามคีย์บอร์ดทีละเฟรม (ไม่กระตุกตอนคีย์บอร์ดเด้งขึ้น/ลง)
+            window.setDecorFitsSystemWindows(false)
+            val bottomTypes = WindowInsets.Type.ime() or WindowInsets.Type.navigationBars()
+            var animating = false
+            root.setOnApplyWindowInsetsListener { _, insets ->
+                if (!animating) setSpacer(insets.getInsets(bottomTypes).bottom)
+                insets
+            }
+            root.setWindowInsetsAnimationCallback(object : WindowInsetsAnimation.Callback(DISPATCH_MODE_STOP) {
+                override fun onPrepare(animation: WindowInsetsAnimation) { animating = true }
+                override fun onProgress(insets: WindowInsets, running: MutableList<WindowInsetsAnimation>): WindowInsets {
+                    setSpacer(insets.getInsets(bottomTypes).bottom)
+                    return insets
+                }
+                override fun onEnd(animation: WindowInsetsAnimation) { animating = false; root.requestApplyInsets() }
+            })
+        } else {
+            root.viewTreeObserver.addOnGlobalLayoutListener {
+                val rect = Rect()
+                root.getWindowVisibleDisplayFrame(rect)
+                setSpacer(maxOf(0, root.height - rect.bottom))
+            }
         }
 
         this.sheetView = sheet
-        this.dimView2  = dimView
     }
 
+    private var dismissing = false
+
     private fun dismissWithAnimation() {
+        if (dismissing) return
+        dismissing = true
+        // เก็บคีย์บอร์ดพร้อมกัน sheet จะได้ลงไปในจังหวะเดียว
+        if (Build.VERSION.SDK_INT >= 30) window.insetsController?.hide(WindowInsets.Type.ime())
         sheetView.animate().translationY(sheetView.height.toFloat())
-            .setDuration(240).setInterpolator(DecelerateInterpolator()).start()
-        dimView2.animate().alpha(0f).setDuration(200).withEndAction {
-            finish(); overridePendingTransition(0, 0)
-        }.start()
+            .setDuration(220).setInterpolator(AccelerateInterpolator(1.5f))
+            .withEndAction { finish(); overridePendingTransition(0, 0) }.start()
     }
 
     @Deprecated("Deprecated in Java")
