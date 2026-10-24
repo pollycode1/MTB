@@ -12,6 +12,7 @@ import android.os.Build
 import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetPlugin
 import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -40,6 +41,43 @@ class MtbTasksWidget : AppWidgetProvider() {
             var id = 100000 + (System.currentTimeMillis() * 1000) % 1_000_000_000
             while (id in used) id++
             return id
+        }
+
+        // เพิ่มงานจากฝั่ง Kotlin (ปุ่ม + ของ widget / แชร์จากแอพอื่น) ลง tasks_json แล้วรีเฟรช widget
+        // aiTodo = ให้แอพส่งให้ AI จัดหมวด/ความสำคัญตอนเปิดหรือกลับเข้าแอพครั้งถัดไป
+        fun addTask(context: Context, task: JSONObject): Boolean {
+            val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            return try {
+                val list = JSONArray(flutterPrefs.getString("flutter.tasks_json", "[]") ?: "[]")
+                task.put("id", newId(list)) // มี id ตั้งแต่แรก widget จะได้ติ๊ก/เปิดงานนี้ได้ก่อนเปิดแอพ
+                if (!task.has("meta")) task.put("meta", "")
+                task.put("done", false); task.put("warn", false)
+                task.put("createdAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US).format(Date()))
+                task.put("aiTodo", true)
+                task.put("doneAt", JSONObject.NULL)
+                list.put(task)
+                val updated = list.toString()
+                flutterPrefs.edit().putString("flutter.tasks_json", updated).apply()
+
+                val pendingCount = (0 until list.length()).count { !list.getJSONObject(it).optBoolean("done") }
+                val total = list.length()
+                val done  = total - pendingCount
+                HomeWidgetPlugin.getData(context).edit()
+                    .putInt("pending_tasks", pendingCount)
+                    .putInt("total_tasks", total)
+                    .putString("tasks_json", updated)  // factory reads from here
+                    .apply()
+
+                val mgr = AppWidgetManager.getInstance(context)
+                val ids = mgr.getAppWidgetIds(ComponentName(context, MtbTasksWidget::class.java))
+                // partial update: only refresh count text + list data (no adapter reset → no flicker)
+                val partial = RemoteViews(context.packageName, R.layout.mtb_widget_tasks)
+                partial.setTextViewText(R.id.widget_task_count,
+                    if (done > 0) "เสร็จ $done/$total" else "เหลือ $pendingCount งาน")
+                for (id in ids) mgr.partiallyUpdateAppWidget(id, partial)
+                mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
+                true
+            } catch (_: Exception) { false }
         }
     }
 

@@ -1,8 +1,6 @@
 package com.example.mtb
 
 import android.app.Activity
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
@@ -16,8 +14,6 @@ import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import es.antonborri.home_widget.HomeWidgetPlugin
-import org.json.JSONArray
 import org.json.JSONObject
 
 class AddTaskActivity : Activity() {
@@ -187,47 +183,16 @@ class AddTaskActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() { dismiss() }
 
+    // เพิ่มจาก widget = งานของวันนี้โดยตรง ไม่ผ่านกล่องรับ (plannedFor = วันนี้ 00:00 เวลาท้องถิ่น)
     private fun saveTask(title: String) {
-        val flutterPrefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
-        val raw   = flutterPrefs.getString("flutter.tasks_json", "[]") ?: "[]"
-        try {
-            val list = JSONArray(raw)
-            // เพิ่มจาก widget = งานของวันนี้โดยตรง ไม่ผ่านกล่องรับ (plannedFor = วันนี้ 00:00 เวลาท้องถิ่น)
-            val cal = java.util.Calendar.getInstance()
-            val today = String.format("%04d-%02d-%02dT00:00:00",
-                cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
-            list.put(JSONObject().apply {
-                put("id", MtbTasksWidget.newId(list)) // มี id ตั้งแต่แรก widget จะได้ติ๊ก/เปิดงานนี้ได้ก่อนเปิดแอพ
-                put("title", title); put("meta", "")
-                put("done", false);  put("warn", false)
-                put("type", "task")
-                put("plannedFor", today)
-                put("createdAt", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date()))
-                put("aiTodo", true) // ให้แอพส่งให้ AI จัดหมวด/ความสำคัญตอนเปิดครั้งถัดไป
-                put("doneAt", JSONObject.NULL)
-                put("tag", JSONObject.NULL); put("tagBg", JSONObject.NULL); put("tagColor", JSONObject.NULL)
-            })
-            val updated = list.toString()
-            flutterPrefs.edit().putString("flutter.tasks_json", updated).apply()
-
-            val pendingCount = (0 until list.length()).count { !list.getJSONObject(it).optBoolean("done") }
-            val total = list.length()
-            val done  = total - pendingCount
-            HomeWidgetPlugin.getData(this).edit()
-                .putInt("pending_tasks", pendingCount)
-                .putInt("total_tasks", total)
-                .putString("tasks_json", updated)  // factory reads from here
-                .apply()
-
-            val mgr = AppWidgetManager.getInstance(this)
-            val ids = mgr.getAppWidgetIds(ComponentName(this, MtbTasksWidget::class.java))
-            // partial update: only refresh count text + list data (no adapter reset → no flicker)
-            val partial = android.widget.RemoteViews(packageName, R.layout.mtb_widget_tasks)
-            partial.setTextViewText(R.id.widget_task_count,
-                if (done > 0) "เสร็จ $done/$total" else "เหลือ $pendingCount งาน")
-            for (id in ids) mgr.partiallyUpdateAppWidget(id, partial)
-            mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
-        } catch (_: Exception) {}
+        val cal = java.util.Calendar.getInstance()
+        val today = String.format("%04d-%02d-%02dT00:00:00",
+            cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
+        MtbTasksWidget.addTask(this, JSONObject().apply {
+            put("title", title)
+            put("type", "task")
+            put("plannedFor", today)
+        })
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
