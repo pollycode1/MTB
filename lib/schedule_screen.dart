@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'models.dart';
 import 'schedule_data.dart';
 
@@ -198,6 +199,46 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     await ScheduleStore.save();
   }
 
+  // ── นำเข้าตารางสอน JSON: คัดลอกรูปแบบไปให้ AI แปลงตาราง แล้ววางกลับมา ──────────────────────
+  void _toast(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  Future<void> _copyTemplate() async {
+    await Clipboard.setData(const ClipboardData(text: scheduleTemplate));
+    if (mounted) _toast('คัดลอกแล้ว · วางให้ AI พร้อมรูปตารางสอน แล้วคัดลอกผลลัพธ์กลับมานำเข้า');
+  }
+
+  // แทนที่เฉพาะประเภทที่มีในข้อมูลนำเข้า (นำเข้าแค่คาบสอน → งานพิเศษเดิมยังอยู่)
+  Future<void> _importJson() async {
+    final r = parseScheduleJson((await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '');
+    if (!mounted) return;
+    if (r.error != null) { _toast('นำเข้าไม่ได้: ${r.error}'); return; }
+    final blocks = r.blocks!;
+    final kinds = blocks.map((b) => b.kind).toSet();
+    final old = ScheduleStore.blocks.where((b) => kinds.contains(b.kind)).length;
+    final label = [if (kinds.contains('teach')) 'ตารางสอน', if (kinds.contains('duty')) 'งานพิเศษ'].join(' และ ');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kCSurf,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('นำเข้า$label?', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: kCText)),
+        content: Text('${blocks.length} รายการ${old > 0 ? ' จะแทนที่ของเดิม $old รายการ' : ''}',
+          style: TextStyle(fontSize: 13.5, color: kCText.withValues(alpha: .6))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('ยกเลิก', style: TextStyle(color: kCText.withValues(alpha: .5)))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('นำเข้า', style: TextStyle(color: kCGreenDk, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    ) ?? false;
+    if (!ok) return;
+    setState(() => ScheduleStore.blocks
+      ..removeWhere((b) => kinds.contains(b.kind))
+      ..addAll(blocks));
+    await ScheduleStore.save();
+    if (mounted) _toast('นำเข้า ${blocks.length} รายการแล้ว');
+  }
+
   // ── วันหยุดพิเศษ: กดค้างที่หัววัน ───────────────────────────────────────────────
   Future<void> _holidayMenu(DateTime d) async {
     final isCustom = Holidays.custom.containsKey(Holidays.key(d));
@@ -283,6 +324,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             tooltip: _week ? 'ดูวันเดียว' : 'ดู 7 วัน',
             onPressed: () => setState(() => _week = !_week),
             icon: Icon(_week ? Icons.view_day_outlined : Icons.calendar_view_week_rounded, color: kCText),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded, color: kCText),
+            color: kCSurf,
+            onSelected: (v) => v == 'copy' ? _copyTemplate() : _importJson(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'copy', child: Text('คัดลอกรูปแบบ JSON', style: TextStyle(color: kCText))),
+              PopupMenuItem(value: 'import', child: Text('นำเข้าตารางจากคลิปบอร์ด', style: TextStyle(color: kCText))),
+            ],
           ),
         ],
       ),

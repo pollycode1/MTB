@@ -44,6 +44,53 @@ class ScheduleStore {
       .setString(_pref, jsonEncode(blocks.map((b) => b.toJson()).toList()));
 }
 
+// ── นำเข้าตารางสอนจาก JSON (วางจากคลิปบอร์ด เช่น ให้ AI แปลงรูปตารางสอนมาเป็นรูปแบบนี้) ─────────────
+const scheduleTemplate = '''แปลงตารางสอนของฉันเป็น JSON รูปแบบนี้ (day = จ/อ/พ/พฤ/ศ/ส/อา หรือ 1–7, เวลา HH:mm ช่วง 06:00–16:30, kind = teach คาบสอน / duty งานพิเศษ เช่น เวร)
+{"blocks": [
+  {"day": "จ", "start": "08:30", "end": "09:20", "title": "คณิต ม.2/3", "kind": "teach"},
+  {"day": "ศ", "start": "15:30", "end": "16:30", "title": "เวรประตู", "kind": "duty"}
+]}''';
+
+const _thaiDays = {
+  'จ': 1, 'จันทร์': 1, 'อ': 2, 'อังคาร': 2, 'พ': 3, 'พุธ': 3, 'พฤ': 4, 'พฤหัส': 4, 'พฤหัสบดี': 4,
+  'ศ': 5, 'ศุกร์': 5, 'ส': 6, 'เสาร์': 6, 'อา': 7, 'อาทิตย์': 7,
+};
+
+int? _parseTime(Object? v) {
+  final m = RegExp(r'^(\d{1,2})[:.](\d{2})$').firstMatch('${v ?? ''}'.trim());
+  if (m == null) return null;
+  final h = int.parse(m[1]!), min = int.parse(m[2]!);
+  return h < 24 && min < 60 ? h * 60 + min : null;
+}
+
+// อ่าน {"blocks":[...]} หรือ [...] · ข้ามข้อความรอบ JSON (คำอธิบาย/```json จาก AI)
+// ผิดแม้แถวเดียว → ไม่นำเข้าเลย บอกว่าแถวไหนผิด (ห้ามทับตารางเดิมด้วยข้อมูลครึ่งๆ)
+({List<WeeklyBlock>? blocks, String? error}) parseScheduleJson(String text) {
+  final start = text.indexOf(RegExp(r'[\[{]'));
+  final end = text.lastIndexOf(RegExp(r'[\]}]'));
+  if (start < 0 || end <= start) return (blocks: null, error: 'ไม่พบ JSON ในข้อความ');
+  Object? data;
+  try { data = jsonDecode(text.substring(start, end + 1)); } catch (_) {
+    return (blocks: null, error: 'อ่าน JSON ไม่ได้ (รูปแบบผิด)');
+  }
+  final rows = data is Map ? data['blocks'] : data;
+  if (rows is! List || rows.isEmpty) return (blocks: null, error: 'ไม่มีรายการใน "blocks"');
+  final out = <WeeklyBlock>[];
+  for (var i = 0; i < rows.length; i++) {
+    final r = rows[i];
+    final bad = 'แถวที่ ${i + 1}';
+    if (r is! Map) return (blocks: null, error: '$bad ไม่ใช่ {...}');
+    final d = r['day'], day = d is num ? d.toInt() : _thaiDays['${d ?? ''}'.trim()];
+    if (day == null || day < 1 || day > 7) return (blocks: null, error: '$bad: day ไม่ถูกต้อง ($d)');
+    final s = _parseTime(r['start']), e = _parseTime(r['end']);
+    if (s == null || e == null || e <= s) return (blocks: null, error: '$bad: เวลาไม่ถูกต้อง (${r['start']}–${r['end']})');
+    final title = '${r['title'] ?? ''}'.trim();
+    if (title.isEmpty) return (blocks: null, error: '$bad: ไม่มี title');
+    out.add(WeeklyBlock(weekday: day, startMin: s, endMin: e, title: title, kind: r['kind'] == 'duty' ? 'duty' : 'teach'));
+  }
+  return (blocks: out, error: null);
+}
+
 // ── วันหยุด: นักขัตฤกษ์จากปฏิทินวันหยุดไทยของ Google (เก็บไว้ในเครื่อง) + วันหยุดพิเศษที่เพิ่มเอง ─────────
 class Holidays {
   static const _cachePref = 'holidays_public';   // {"2026-10-23": "วันปิยมหาราช", ...}
