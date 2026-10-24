@@ -241,7 +241,8 @@ class MtbTasksWidget : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_add, PendingIntent.getActivity(
                 context, 4000 + id,
                 Intent(context, AddTaskActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    // ปิดอนิเมชั่นเปิดหน้าต่างของระบบ/launcher — ให้เหลือแค่ sheet เลื่อนขึ้น
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             ))

@@ -10,12 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
 import android.view.WindowManager
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -25,7 +22,6 @@ import org.json.JSONObject
 
 class AddTaskActivity : Activity() {
 
-    private lateinit var sheetView: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,7 +88,7 @@ class AddTaskActivity : Activity() {
             setOnEditorActionListener { _, _, _ ->
                 val t = text.toString().trim()
                 if (t.isNotEmpty()) saveTask(t)
-                dismissWithAnimation(); true
+                dismiss(); true
             }
         }
 
@@ -102,7 +98,7 @@ class AddTaskActivity : Activity() {
             textSize = 14f
             setTextColor(Color.parseColor("#55E2E2E2"))
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            setOnClickListener { dismissWithAnimation() }
+            setOnClickListener { dismiss() }
         })
         btnRow.addView(TextView(this).apply {
             text = "เพิ่ม"
@@ -122,7 +118,7 @@ class AddTaskActivity : Activity() {
             setOnClickListener {
                 val t = input.text.toString().trim()
                 if (t.isNotEmpty()) saveTask(t)
-                dismissWithAnimation()
+                dismiss()
             }
         })
 
@@ -134,7 +130,7 @@ class AddTaskActivity : Activity() {
         // ── Root: พื้นที่แตะเพื่อปิด | sheet | keyboardSpacer ─────────────────────
         // ไม่มีพื้นหลังมืด/เฟด — มีแค่ sheet เลื่อนขึ้นอย่างเดียว
         val dimView = View(this).apply {
-            setOnClickListener { dismissWithAnimation() }
+            setOnClickListener { dismiss() }
         }
         val keyboardSpacer = View(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -143,17 +139,12 @@ class AddTaskActivity : Activity() {
         root.addView(keyboardSpacer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0))
 
         setContentView(root)
-        overridePendingTransition(0, 0)
-
-        // Slide up from bottom
-        sheet.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                sheet.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                sheet.translationY = sheet.height.toFloat()
-                sheet.animate().translationY(0f).setDuration(300)
-                    .setInterpolator(DecelerateInterpolator(2f)).start()
-            }
-        })
+        if (Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            overridePendingTransition(0, 0)
+        }
 
         // Keyboard spacer
         fun setSpacer(h: Int) {
@@ -185,23 +176,16 @@ class AddTaskActivity : Activity() {
             }
         }
 
-        this.sheetView = sheet
     }
 
-    private var dismissing = false
-
-    private fun dismissWithAnimation() {
-        if (dismissing) return
-        dismissing = true
-        // เก็บคีย์บอร์ดพร้อมกัน sheet จะได้ลงไปในจังหวะเดียว
-        if (Build.VERSION.SDK_INT >= 30) window.insetsController?.hide(WindowInsets.Type.ime())
-        sheetView.animate().translationY(sheetView.height.toFloat())
-            .setDuration(220).setInterpolator(AccelerateInterpolator(1.5f))
-            .withEndAction { finish(); overridePendingTransition(0, 0) }.start()
+    // ไม่มีอนิเมชั่น — sheet โผล่/หายทันที
+    private fun dismiss() {
+        finish()
+        if (Build.VERSION.SDK_INT < 34) overridePendingTransition(0, 0)
     }
 
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { dismissWithAnimation() }
+    override fun onBackPressed() { dismiss() }
 
     private fun saveTask(title: String) {
         val flutterPrefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
