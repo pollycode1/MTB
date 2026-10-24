@@ -56,6 +56,28 @@ void main() {
     Holidays.public = {}; Holidays.custom = {};
   });
 
+  test('schedule JSON import: template round-trips, Thai days, rejects bad rows', () {
+    final fromTemplate = parseScheduleJson(scheduleTemplate);
+    expect(fromTemplate.error, isNull);
+    expect(fromTemplate.blocks!.first.title, isNotEmpty);
+
+    // ข้อความจาก AI ที่มีคำอธิบายรอบ JSON ก็อ่านได้ · วันเป็นชื่อไทยหรือเลข · เวลา 8.30 หรือ 08:30
+    final r = parseScheduleJson('นี่คือตารางครับ\n```json\n{"blocks":[\n'
+        '{"day":"พฤหัสบดี","start":"8.30","end":"09:20","title":"คณิต ม.2/3"},\n'
+        '{"day":5,"start":"13:00","end":"14:00","title":"เวรประตู","kind":"duty"}]}\n```');
+    expect(r.error, isNull);
+    expect([for (final b in r.blocks!) [b.weekday, b.startMin, b.endMin, b.title, b.kind]], [
+      [4, 8 * 60 + 30, 9 * 60 + 20, 'คณิต ม.2/3', 'teach'],
+      [5, 13 * 60, 14 * 60, 'เวรประตู', 'duty'],
+    ]);
+    expect(parseScheduleJson('[{"day":"จ","start":"09:00","end":"10:00","title":"a"}]').blocks!.single.weekday, 1);
+
+    expect(parseScheduleJson('hello').error, isNotNull);
+    expect(parseScheduleJson('{"blocks":[{"day":"x","start":"09:00","end":"10:00","title":"a"}]}').error, contains('1'));
+    expect(parseScheduleJson('{"blocks":[{"day":1,"start":"10:00","end":"09:00","title":"a"}]}').error, isNotNull);
+    expect(parseScheduleJson('{"blocks":[]}').error, isNotNull);
+  });
+
   test('Thai holiday ics: keeps public holidays only, expands ranges', () {
     const ics = 'BEGIN:VCALENDAR\r\n'
         'BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261023\r\nDTEND;VALUE=DATE:20261024\r\n'
