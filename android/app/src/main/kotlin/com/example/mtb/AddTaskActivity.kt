@@ -1,6 +1,7 @@
 package com.example.mtb
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
@@ -89,6 +90,20 @@ class AddTaskActivity : Activity() {
         }
 
         val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+        // พูดแทนพิมพ์ → บันทึกทันที แอพให้ AI แยกเป็นหลายงานตอนเปิดครั้งถัดไป
+        btnRow.addView(TextView(this).apply {
+            text = "🎤 พูด"
+            textSize = 14f
+            setTextColor(Color.parseColor("#E2E2E2"))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setOnClickListener {
+                try { startActivityForResult(MainActivity.voiceIntent(), MainActivity.VOICE_REQUEST) }
+                catch (_: android.content.ActivityNotFoundException) {
+                    android.widget.Toast.makeText(this@AddTaskActivity, "เครื่องนี้ไม่มีระบบรับเสียงพูด", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+        btnRow.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
         btnRow.addView(TextView(this).apply {
             text = "ยกเลิก"
             textSize = 14f
@@ -182,6 +197,20 @@ class AddTaskActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() { dismiss() }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != MainActivity.VOICE_REQUEST || resultCode != RESULT_OK) return
+        val text = MainActivity.spokenText(data) ?: return
+        MtbTasksWidget.addTask(this, JSONObject().apply {
+            put("title", text)
+            put("type", "inbox")
+            put("aiSplit", true) // แอพให้ AI แยกเป็นงานย่อยตอนเปิด
+        })
+        android.widget.Toast.makeText(this, "เพิ่มแล้ว: $text", android.widget.Toast.LENGTH_SHORT).show()
+        dismiss()
+    }
 
     // เพิ่มจาก widget = งานของวันนี้โดยตรง ไม่ผ่านกล่องรับ (plannedFor = วันนี้ 00:00 เวลาท้องถิ่น)
     private fun saveTask(title: String) {

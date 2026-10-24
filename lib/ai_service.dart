@@ -106,3 +106,26 @@ const aiTagRule = 'ใส่ 2-4 แท็กให้ครอบคลุม�
     '(2) ห้อง/ระดับชั้น/วิชา ถ้ามีในข้อความ เช่น ม.2 3/2 (3) คนหรือกลุ่มที่เกี่ยวข้อง เช่น ผู้ปกครอง ฝ่ายวิชาการ '
     '(4) ลักษณะงาน เช่น ด่วน รอคนอื่น ทำซ้ำ — ถ้าแท็กที่มีอยู่ความหมายตรงให้ใช้ชื่อเดิม ถ้าไม่มีให้ตั้งใหม่ได้ สั้น 1-2 คำ '
     'ห้ามซ้ำกับชื่อหมวด ห้ามใส่ # นำหน้า';
+
+// ── พูดแทนพิมพ์: แยกข้อความเสียงเป็นหลายงาน (แต่ละงานไปจัดหมวด/วันส่งต่อด้วย _aiTriage) ──────────
+Future<List<String>> splitSpokenTasks(String text) async {
+  final r = await AiService.askJson(
+    system: aiSystem,
+    prompt: '${todayLine()}\nผู้ใช้พูดสิ่งที่ต้องทำ (ถอดเสียงอัตโนมัติ อาจสะกดผิด/ไม่มีวรรคตอน):\n"$text"\n\n'
+        'แยกเป็นรายการงาน 1 งานต่อ 1 รายการ เขียนชื่องานสั้น กระชับ แก้คำที่ถอดเสียงผิดให้ถูก '
+        'คงวัน/เวลา/ห้อง/ชื่อคนที่พูดถึงไว้ในชื่องาน ห้ามเพิ่มงานที่ไม่ได้พูด ถ้าพูดเรื่องเดียวให้ตอบรายการเดียว',
+    schema: {
+      'type': 'object',
+      'properties': {'tasks': {'type': 'array', 'items': {'type': 'string'}}},
+      'required': ['tasks'],
+      'additionalProperties': false,
+    },
+  );
+  return cleanSplit(r['tasks'] as List? ?? [], fallback: text);
+}
+
+// ตัดรายการว่าง/ซ้ำ ไม่เกิน 10 งาน · AI ไม่ได้อะไรเลย → ใช้ข้อความเดิมเป็นงานเดียว
+List<String> cleanSplit(List raw, {required String fallback}) {
+  final out = raw.map((x) => '$x'.trim()).where((x) => x.isNotEmpty).toSet().take(10).toList();
+  return out.isEmpty ? [fallback] : out;
+}
