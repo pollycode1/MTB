@@ -9,6 +9,32 @@ List<TaskItem> tasksInMonth(List<TaskItem> tasks, int year, int month) {
     ..sort((a, b) => (a.doneAt ?? a.deadline ?? a.createdAt).compareTo(b.doneAt ?? b.deadline ?? b.createdAt));
 }
 
+// งานของวันใดวันหนึ่ง (เกณฑ์เดียวกับ tasksInMonth) เรียงตามเวลาในวันนั้น
+List<TaskItem> tasksOnDay(List<TaskItem> tasks, DateTime day) {
+  DateTime? on(TaskItem t) => [t.doneAt, t.deadline, t.plannedFor, t.createdAt]
+      .firstWhere((d) => d != null && d.year == day.year && d.month == day.month && d.day == day.day, orElse: () => null);
+  return tasks.where((t) => (t.type == 'task' || t.type == 'idea') && on(t) != null).toList()
+    ..sort((a, b) => on(a)!.compareTo(on(b)!));
+}
+
+// เตือน "วันนี้ปีที่แล้ว" 07:05 ของวันที่ปีที่แล้วมีงาน และ "เดือนนี้ปีที่แล้ว" 07:10 วันที่ 1 · ใน [days] วันข้างหน้า
+List<({DateTime at, String title, String body})> lastYearReminders(List<TaskItem> tasks, DateTime now, {int days = 14}) {
+  String summary(List<TaskItem> l) => '${l.length} งาน · ${l.take(3).map((t) => t.title).join(', ')}';
+  final out = <({DateTime at, String title, String body})>[];
+  for (var i = 0; i < days; i++) {
+    final d = DateTime(now.year, now.month, now.day + i);
+    final day = tasksOnDay(tasks, DateTime(d.year - 1, d.month, d.day));
+    final dayAt = DateTime(d.year, d.month, d.day, 7, 5);
+    if (day.isNotEmpty && dayAt.isAfter(now)) out.add((at: dayAt, title: 'วันนี้ปีที่แล้ว', body: summary(day)));
+    final monthAt = DateTime(d.year, d.month, d.day, 7, 10);
+    if (d.day == 1 && monthAt.isAfter(now)) {
+      final month = tasksInMonth(tasks, d.year - 1, d.month);
+      if (month.isNotEmpty) out.add((at: monthAt, title: 'เดือนนี้ปีที่แล้ว', body: summary(month)));
+    }
+  }
+  return out;
+}
+
 // คัดลอกงานเก่าเป็นงานใหม่ของวันนี้: เก็บชื่อ หมายเหตุ หมวด แท็ก ความสำคัญ ขั้นต่อไป ขั้นตอนย่อย (รีเซ็ตติ๊ก)
 // กำหนดส่งเลื่อนไป 1 ปี ถ้ายังไม่เลยมา · ไม่คัดลอกไฟล์แนบ
 TaskItem copyAsNew(TaskItem old, {DateTime? now}) {
@@ -51,6 +77,7 @@ class _LastYearScreenState extends State<LastYearScreen> {
     final list = tasksInMonth(widget.tasks, _month.year, _month.month);
     final n = DateTime.now();
     final isLastYear = _month.year == n.year - 1 && _month.month == n.month;
+    final today = isLastYear ? tasksOnDay(widget.tasks, DateTime(n.year - 1, n.month, n.day)) : <TaskItem>[];
     return Scaffold(
       backgroundColor: kCBg,
       appBar: AppBar(
@@ -92,6 +119,15 @@ class _LastYearScreenState extends State<LastYearScreen> {
         Expanded(child: list.isEmpty
           ? Center(child: Text('ไม่มีงานในเดือนนี้', style: TextStyle(color: kCText.withValues(alpha: .4))))
           : ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
+              if (today.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, bottom: 10),
+                  child: Text('วันนี้ปีที่แล้ว (${n.day} ${_months[n.month - 1]} ${n.year + 542}) · ${today.length} งาน',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: kCGoldDark)),
+                ),
+                for (final t in today) _row(t),
+                const SizedBox(height: 14),
+              ],
               Padding(
                 padding: const EdgeInsets.only(left: 4, bottom: 10),
                 child: Text('${list.length} งาน · เลือกงานที่จะทำอีกครั้ง', style: TextStyle(fontSize: 11.5, color: kCText.withValues(alpha: .45))),

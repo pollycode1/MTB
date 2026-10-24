@@ -4,6 +4,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'models.dart';
 import 'notif_log.dart';
 import 'schedule_data.dart';
+import 'last_year_screen.dart' show lastYearReminders;
 
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
@@ -11,6 +12,7 @@ class NotificationService {
   // HomeScreen ตั้งไว้ให้เปิดหน้าสรุปสัปดาห์เมื่อกดแจ้งเตือนรีวิว
   static void Function()? onWeeklyTap;
   static void Function()? onPlanTap;
+  static void Function()? onLastYearTap;
   static const planReminderHour = 7; // เตือนวางแผนทุกวัน 07:00
 
   static Future<void> init() async {
@@ -21,6 +23,7 @@ class NotificationService {
       onDidReceiveNotificationResponse: (r) {
         if (r.payload == 'weekly') onWeeklyTap?.call();
         if (r.payload == 'plan') onPlanTap?.call();
+        if (r.payload == 'lastyear') onLastYearTap?.call();
       },
     );
     await _plugin
@@ -32,7 +35,7 @@ class NotificationService {
     _ready = true;
   }
 
-  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | null)
+  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | null)
   static Future<String?> launchPayload() async {
     final d = await _plugin.getNotificationAppLaunchDetails();
     return d?.didNotificationLaunchApp == true ? d?.notificationResponse?.payload : null;
@@ -122,6 +125,21 @@ class NotificationService {
         )),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
+    for (final r in lastYearReminders(tasks, DateTime.now())) {
+      NotifLog.add(NotifEntry(id, r.at, r.title, r.body, payload: 'lastyear'));
+      await _plugin.zonedSchedule(
+        id++, r.title, r.body,
+        tz.TZDateTime.from(r.at, tz.local),
+        const NotificationDetails(android: AndroidNotificationDetails(
+          'last_year', 'ปีที่แล้ววันนี้',
+          channelDescription: 'งานที่ทำในวัน/เดือนเดียวกันของปีที่แล้ว',
+          importance: Importance.defaultImportance, priority: Priority.defaultPriority,
+        )),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        payload: 'lastyear',
       );
     }
     await NotifLog.save();
