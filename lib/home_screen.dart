@@ -297,7 +297,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   // งานที่เพิ่มจาก widget / แชร์จากแอพอื่น (aiTodo) → ให้ AI จัดหมวด/ความสำคัญ/วันส่ง
   Future<void> _triageAiTodo() async {
     if (!await AiService.hasKey()) return;
-    for (final t in _tasks.where((t) => t.aiTodo && !_aiBusy.contains(t.id)).toList()) {
+    // พูดจาก widget: แยกเป็นหลายงานก่อน แล้วลบข้อความเดิม (งานใหม่ไปจัดหมวดใน _addToInbox)
+    for (final t in _tasks.where((t) => t.aiSplit && !_aiBusy.contains(t.id)).toList()) {
+      _aiBusy.add(t.id);
+      List<String> titles;
+      try { titles = await splitSpokenTasks(t.title); } catch (_) { _aiBusy.remove(t.id); continue; }
+      if (!mounted) return;
+      _set(() { _tasks.remove(t); _aiBusy.remove(t.id); });
+      for (final x in titles) { _addToInbox(x); }
+    }
+    for (final t in _tasks.where((t) => t.aiTodo && !t.aiSplit && !_aiBusy.contains(t.id)).toList()) {
       _aiTriage(t);
     }
   }

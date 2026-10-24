@@ -82,6 +82,7 @@ class TaskItem {
   int? estimateMin;     // เวลาที่คาดว่าจะใช้ (นาที)
   int? actualMin;       // เวลาที่ใช้จริง ถามตอนกดเสร็จ ถ้ามี estimateMin
   bool aiTodo;          // เพิ่มจาก widget แล้วยังไม่ได้ให้ AI จัดหมวด/ความสำคัญ
+  bool aiSplit;         // พูดจาก widget: ให้ AI แยกข้อความเป็นหลายงานก่อน (แล้วลบอันนี้)
   final List<String> attachments; // ไฟล์แนบ: path สัมพัทธ์ใน Attachments.rootPath
   DateTime? slotStart; // ลงเวลาในตาราง (วัน+เวลาเริ่ม)
   int slotMin;         // ระยะเวลาในตาราง (นาที)
@@ -125,6 +126,7 @@ class TaskItem {
     this.estimateMin,
     this.actualMin,
     this.aiTodo = false,
+    this.aiSplit = false,
     DateTime? createdAt,
     this.slotStart,
     this.slotMin = 60,
@@ -163,6 +165,7 @@ class TaskItem {
     'estimateMin': estimateMin,
     'actualMin': actualMin,
     if (aiTodo) 'aiTodo': true,
+    if (aiSplit) 'aiSplit': true,
     'createdAt': createdAt.toIso8601String(),
     if (slotStart != null) 'slotStart': slotStart!.toIso8601String(),
     if (slotStart != null) 'slotMin': slotMin,
@@ -196,6 +199,7 @@ class TaskItem {
     estimateMin: (j['estimateMin'] as num?)?.toInt(),
     actualMin: (j['actualMin'] as num?)?.toInt(),
     aiTodo: j['aiTodo'] as bool? ?? false,
+    aiSplit: j['aiSplit'] as bool? ?? false,
     createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime(2000),
     slotStart: j['slotStart'] != null ? DateTime.tryParse(j['slotStart'] as String) : null,
     slotMin: (j['slotMin'] as num?)?.toInt() ?? 60,

@@ -39,6 +39,13 @@ extension _InputSheets on _HomeScreenState {
               )),
               const SizedBox(width: 10),
               GestureDetector(
+                onTap: () { Navigator.pop(context); _captureVoice(); },
+                child: Container(width: 44, height: 44,
+                  decoration: BoxDecoration(color: _cSurf, borderRadius: BorderRadius.circular(14), border: Border.all(color: _cText.withValues(alpha: .2))),
+                  child: Center(child: Icon(Icons.mic_none_rounded, color: _cText.withValues(alpha: .7), size: 20))),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
                 onTap: () { if (ctrl.text.trim().isNotEmpty) _addToInbox(ctrl.text.trim()); Navigator.pop(context); },
                 child: Container(width: 44, height: 44,
                   decoration: BoxDecoration(color: _cSurf, borderRadius: BorderRadius.circular(14), border: Border.all(color: _cText.withValues(alpha: .2))),
@@ -58,6 +65,30 @@ extension _InputSheets on _HomeScreenState {
     _saveTasks();
     _updateWidget();
     AiService.hasKey().then((k) { if (k && mounted) _aiTriage(item); }); // จัดหมวด/ความสำคัญให้ทันที
+  }
+
+  // พูดแทนพิมพ์ → AI แยกเป็นหลายงาน → เข้ากล่องรับ แต่ละงานให้ AI จัดหมวด/วันส่งต่อ (ไม่มี key = งานเดียว)
+  Future<void> _captureVoice() async {
+    String? text;
+    try {
+      text = await const MethodChannel('mtb/voice').invokeMethod<String>('listen');
+    } on PlatformException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? 'ใช้เสียงไม่ได้')));
+      return;
+    }
+    if (text == null || text.trim().isEmpty) return;
+    await _voiceToTasks(text.trim());
+  }
+
+  Future<void> _voiceToTasks(String text) async {
+    var titles = [text];
+    if (await AiService.hasKey()) {
+      try { titles = await splitSpokenTasks(text); } catch (_) {/* AI ล่ม → เก็บทั้งก้อนเป็นงานเดียว */}
+    }
+    if (!mounted) return;
+    for (final t in titles) { _addToInbox(t); }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+        titles.length == 1 ? 'เพิ่มแล้ว: ${titles.first}' : 'เพิ่ม ${titles.length} งาน: ${titles.join(' · ')}')));
   }
 
   void _addIdea(String text) {

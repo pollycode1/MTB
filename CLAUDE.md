@@ -18,7 +18,7 @@ Single-screen Flutter app — no routing library, no state management package. E
 
 **State lives in `_HomeScreenState`** — `_tasks` is a plain Dart lists mutated directly and re-persisted via `SharedPreferences` on every change (`tasks_json`). No streams, no ChangeNotifier. Habits were removed; there is no habit model or tab.
 
-**Five tabs** (index → builder in `_buildMain()`): 0 วันนี้ (`_todayContent`), 1 กล่องรับ (`_inboxContent`), 2 ไอเดีย (`_ideaContent`), 3 ประวัติ (`_historyContent`), 4 เก็บถาวร (`_archivedContent`).
+**Tabs** (index → builder in `_buildMain()`): 0 งาน (`_todayContent`, inbox merged in), 2 ไอเดีย (`_ideaContent`), 3 ประวัติ (`_historyContent`), 4 เก็บถาวร (`_archivedContent`), 5 แจ้งเตือน (`_notifContent`).
 
 **GTD flow** — the + button captures text into the inbox (`type: 'inbox'`). Moving an inbox item to a task (`_moveToTask`) requires a `nextAction` and optionally an `area` (สอน/ส่วนตัว/บ้าน). Other types: `idea` (archived after 60 idle days; long-press an idea for AI tags / move to task), `waiting` (flagged "ติดตาม" after 7 idle days). Rules run in `_runRules()` on load. `NotificationService.scheduleWeeklyReview()` posts a weekly reminder (id 9999).
 
@@ -33,6 +33,10 @@ Single-screen Flutter app — no routing library, no state management package. E
 **AI (Claude Haiku 5.5)** — `lib/ai_service.dart` calls the Messages API over raw HTTP (`dart:io`, no Dart SDK) with `output_config.format` JSON schemas; the API key is entered in Settings and stored in SharedPreferences (`settings_ai_key`). Entry points: "ให้ AI ช่วยเลือก" in the morning plan (`home_plan.dart`), "✨ AI จัด" on inbox cards (`_aiTriage` in `home_inbox.dart`), "ให้ AI แตกขั้นตอน" in task detail, and "วิเคราะห์สัปดาห์" in the weekly summary. Task titles (including student names) are sent to the API only when the user taps these buttons.
 
 **Backup** — `AutoBackup.run()` (`lib/backup.dart`) runs on load and whenever the app is paused: one file per day, `Download/MTB/mtb-backup-YYYY-MM-DD.json` (overwritten during the day, last 7 kept), with attachments embedded as base64 under `files`. If Download isn't writable it falls back to `<app external>/backups`. Settings restores from a picked file or from the clipboard (the clipboard copy has no attachments).
+
+**Voice capture** — `MainActivity` exposes MethodChannel `mtb/voice` (`listen`) using the system `RecognizerIntent` (th-TH, no mic permission). In-app mic (add sheet) → `splitSpokenTasks()` (AI) → one inbox item per task, each AI-triaged. The widget's 🎤 saves the raw text as an inbox item with `aiSplit`; `_triageAiTodo()` splits it on next load/resume.
+
+**Derived notifications** — `NotificationService.rescheduleDerived()` (ids 20000–29999) rebuilds class reminders (`classReminders()`, 10 min before each `WeeklyBlock`, open tasks matched by room like `ม.2/3`) and last-year reminders (`lastYearReminders()`) for the next 14 days; called on load, on pause and after the schedule screen closes. Every scheduled notification is also recorded in `NotifLog` (`lib/notif_log.dart`), which backs the แจ้งเตือน tab (index 5).
 
 ## Models (`lib/models.dart`)
 
