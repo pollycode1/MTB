@@ -78,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     _loadSettings();
     NotificationService.onWeeklyTap = _openWeeklySummary;
     NotificationService.onPlanTap = _openMorningPlan;
+    NotificationService.onLastYearTap = _openLastYear;
     _loadTasks().then((_) async {
       _tasksLoaded = true;
       Tags.mergeFrom(_tasks);
@@ -90,6 +91,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _openWeeklySummary();
       } else if (launch == 'plan') {
         _openMorningPlan();
+      } else if (launch == 'lastyear') {
+        _openLastYear();
       } else {
         _maybeShowMorningPlan();
       }
