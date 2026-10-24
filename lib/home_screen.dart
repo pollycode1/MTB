@@ -79,11 +79,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       _tasksLoaded = true;
       Tags.mergeFrom(_tasks);
       AutoBackup.run(_tasks);
-      if (await AiService.hasKey()) {
-        for (final t in _tasks.where((t) => t.aiTodo).toList()) {
-          _aiTriage(t);
-        }
-      }
+      _triageAiTodo();
       // เปิดจากแจ้งเตือนรีวิวรายสัปดาห์ → ไปหน้าสรุปก่อน แทนแผนเช้า
       final launch = await NotificationService.launchPayload();
       if (launch == 'weekly') {
@@ -266,9 +262,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _loadTasks().then((_) => _updateWidget());
+      _loadTasks().then((_) { _updateWidget(); _triageAiTodo(); });
     } else if (state == AppLifecycleState.paused && _tasksLoaded) {
       AutoBackup.run(_tasks); // สลับออกจากแอพ → อัปเดตไฟล์สำรองของวันนี้
+    }
+  }
+
+  // งานที่เพิ่มจาก widget / แชร์จากแอพอื่น (aiTodo) → ให้ AI จัดหมวด/ความสำคัญ/วันส่ง
+  Future<void> _triageAiTodo() async {
+    if (!await AiService.hasKey()) return;
+    for (final t in _tasks.where((t) => t.aiTodo && !_aiBusy.contains(t.id)).toList()) {
+      _aiTriage(t);
     }
   }
 

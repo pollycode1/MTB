@@ -51,6 +51,22 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
+        <!-- แชร์ข้อความจากแอพอื่น → กล่องรับ (ไม่มีหน้าจอ แสดงแค่ Toast) -->
+        <activity
+            android:name=".ShareToInboxActivity"
+            android:exported="true"
+            android:label="MTB กล่องรับ"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <!-- Floating add-task dialog (no full app open) -->
         <activity
             android:name=".AddTaskActivity"
