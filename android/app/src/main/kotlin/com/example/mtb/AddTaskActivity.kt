@@ -156,8 +156,11 @@ class AddTaskActivity : Activity() {
             window.setDecorFitsSystemWindows(false)
             val bottomTypes = WindowInsets.Type.ime() or WindowInsets.Type.navigationBars()
             var animating = false
+            // ซ่อนไว้จนรู้ระยะแถบนำทาง/คีย์บอร์ด ไม่งั้นเฟรมแรก sheet อยู่ผิดที่แล้วกระโดด (ดูเหมือนกระพริบ)
+            root.visibility = View.INVISIBLE
             root.setOnApplyWindowInsetsListener { _, insets ->
                 if (!animating) setSpacer(insets.getInsets(bottomTypes).bottom)
+                root.visibility = View.VISIBLE
                 insets
             }
             root.setWindowInsetsAnimationCallback(object : WindowInsetsAnimation.Callback(DISPATCH_MODE_STOP) {
