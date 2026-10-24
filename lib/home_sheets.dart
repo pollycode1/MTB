@@ -53,43 +53,19 @@ extension _InputSheets on _HomeScreenState {
   }
 
   void _addToInbox(String text) {
-    _set(() => _tasks.add(TaskItem(title: text, meta: 'inbox', type: 'inbox', lastUpdatedAt: DateTime.now())));
+    final item = TaskItem(title: text, type: 'inbox', lastUpdatedAt: DateTime.now());
+    _set(() => _tasks.add(item));
     _saveTasks();
     _updateWidget();
-    // 2-minute rule: งานสั้น ไม่มี deadline → ถามว่าทำเลยไหม
-    if (text.length < 30) {
-      Future.microtask(() {
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: _cSurf,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-            title: const Text('ทำเลยไหม? ⚡', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _cText)),
-            content: Text('"$text"\nดูเหมือนใช้เวลาไม่เกิน 2 นาที', style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .7))),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text('เข้า inbox ก่อน', style: TextStyle(color: _cText.withValues(alpha: .5)))),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  // convert ล่าสุดเป็น task type แล้ว mark done ทันที
-                  _set(() {
-                    final t = _tasks.last;
-                    t.type = 'task';
-                    t.meta = 'ทำเสร็จแล้ว (2-min rule)';
-                    t.done = true;
-                    t.doneAt = DateTime.now();
-                  });
-                  _saveTasks();
-                  _updateWidget();
-                },
-                child: const Text('ทำเสร็จแล้ว ✓', style: TextStyle(color: _cGreen, fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-        );
-      });
-    }
+    AiService.hasKey().then((k) { if (k && mounted) _aiTriage(item); }); // จัดหมวด/ความสำคัญให้ทันที
+  }
+
+  void _addIdea(String text) {
+    if (text.trim().isEmpty) return;
+    final idea = TaskItem(title: text.trim(), type: 'idea');
+    _set(() => _tasks.add(idea));
+    _saveTasks();
+    AiService.hasKey().then((k) { if (k && mounted) _aiTag(idea); }); // ติดแท็กให้ทันที
   }
 
   void _openIdeaInput() {
@@ -117,7 +93,7 @@ extension _InputSheets on _HomeScreenState {
                 controller: ctrl, autofocus: true,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (v) {
-                  if (v.trim().isNotEmpty) { _set(() => _tasks.add(TaskItem(title: v.trim(), meta: 'ไอเดีย', type: 'idea'))); _saveTasks(); }
+                  _addIdea(v);
                   Navigator.pop(context);
                 },
                 style: const TextStyle(fontSize: 15, color: _cText),
@@ -133,7 +109,7 @@ extension _InputSheets on _HomeScreenState {
               const SizedBox(width: 10),
               GestureDetector(
                 onTap: () {
-                  if (ctrl.text.trim().isNotEmpty) { _set(() => _tasks.add(TaskItem(title: ctrl.text.trim(), meta: 'ไอเดีย', type: 'idea'))); _saveTasks(); }
+                  _addIdea(ctrl.text);
                   Navigator.pop(context);
                 },
                 child: Container(width: 44, height: 44,

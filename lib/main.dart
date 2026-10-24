@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'attachments.dart';
+import 'categories.dart';
 import 'home_screen.dart';
+import 'schedule_data.dart';
+import 'tags.dart';
 import 'notification_service.dart';
 
 @pragma('vm:entry-point')
@@ -57,6 +61,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HomeWidget.registerInteractivityCallback(widgetCallback);
   await NotificationService.init();
+  await Categories.load();
+  await Tags.load();
+  await Attachments.init();
+  await ScheduleStore.load();
+  await Holidays.load();
   runApp(const MTBApp());
 }
 

@@ -15,5 +15,11 @@ void main() {
     expect(old.isFrog, false);
     expect(old.postponeCount, 0);
     expect(old.estimateMin, isNull);
+
+    // หลายแท็ก: อ่านข้อมูลเก่าที่มีแท็กเดียว และบันทึก/อ่านกลับครบทุกแท็ก
+    expect(TaskItem.fromJson({'title': 'x', 'tag': 'ด่วน'}).tags, ['ด่วน']);
+    final multi = TaskItem.fromJson(TaskItem(title: 'm', tags: ['ด่วน', 'ม.2']).toJson());
+    expect(multi.tags, ['ด่วน', 'ม.2']);
+    expect(multi.tag, 'ด่วน');
   });
 }

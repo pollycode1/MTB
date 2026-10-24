@@ -255,6 +255,17 @@ class MtbTasksWidget : AppWidgetProvider() {
             }
             views.setPendingIntentTemplate(R.id.widget_list, template)
 
+            // ปุ่มตาราง → เปิดแอพที่หน้าตารางเวลา (mtb://schedule ผ่าน launch action ของ home_widget)
+            views.setOnClickPendingIntent(R.id.widget_schedule, PendingIntent.getActivity(
+                context, 4500 + id,
+                Intent(context, MainActivity::class.java).apply {
+                    action = "es.antonborri.home_widget.action.LAUNCH"
+                    setData(Uri.parse("mtb://schedule")) // ใช้ setData เพราะใน onUpdate มีตัวแปรชื่อ data อยู่แล้ว
+                    flags  = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            ))
+
             views.setOnClickPendingIntent(R.id.widget_add, PendingIntent.getActivity(
                 context, 4000 + id,
                 Intent(context, AddTaskActivity::class.java).apply {

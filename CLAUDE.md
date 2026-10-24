@@ -20,15 +20,17 @@ Single-screen Flutter app — no routing library, no state management package. E
 
 **Five tabs** (index → builder in `_buildMain()`): 0 วันนี้ (`_todayContent`), 1 กล่องรับ (`_inboxContent`), 2 ไอเดีย (`_ideaContent`), 3 ประวัติ (`_historyContent`), 4 เก็บถาวร (`_archivedContent`).
 
-**GTD flow** — the + button captures text into the inbox (`type: 'inbox'`). Moving an inbox item to a task (`_moveToTask`) requires a `nextAction` and optionally an `area` (สอน/ส่วนตัว/บ้าน). Other types: `idea` (resurfaces after `reviewCount >= 3`, archived after 60 idle days), `waiting` (flagged "ติดตาม" after 7 idle days). Rules run in `_runRules()` on load. `NotificationService.scheduleWeeklyReview()` posts a weekly reminder (id 9999).
+**GTD flow** — the + button captures text into the inbox (`type: 'inbox'`). Moving an inbox item to a task (`_moveToTask`) requires a `nextAction` and optionally an `area` (สอน/ส่วนตัว/บ้าน). Other types: `idea` (archived after 60 idle days; long-press an idea for AI tags / move to task), `waiting` (flagged "ติดตาม" after 7 idle days). Rules run in `_runRules()` on load. `NotificationService.scheduleWeeklyReview()` posts a weekly reminder (id 9999).
 
 **วันนี้ tab** — pending tasks are ranked by `_rankForFocus` (overdue → due today → due within 2 days → priority). The top 5 are shown as "โฟกัสวันนี้"; the rest sit behind a toggle.
 
 **Android home-screen widgets** — Kotlin AppWidgets (`MtbTasksWidget`, add-task activity) communicate with Flutter via `home_widget` + `SharedPreferences` (app group `group.com.example.mtb`). The Kotlin side reads and rewrites `flutter.tasks_json` and addresses tasks **by list index**; `widgetCallback` in `main.dart` is the background entry point for checkbox toggles. After any state change, call `_updateWidget()`.
 
-**Task ids** — every `TaskItem` has a persistent `id` (generated in `models.dart`, back-filled on load for old data or tasks added by the widget). Use `task.id` for notification ids (`NotificationService.scheduleDeadline(task.id, task)` / `.cancel(task.id)`; priority-1 tasks also use `id + 10000`) and for UI keys such as `_expandedCards`. Never use the list index for either — deleting a task shifts indices. When ids are missing on load, `_migrateNotificationIds()` cancels everything and reschedules. The widget's index-based toggle is the one remaining index dependency.
+**Task ids** — every `TaskItem` has a persistent `id` (generated in `models.dart`, back-filled on load for old data or tasks added by the widget). Use `task.id` for notification ids (`NotificationService.scheduleDeadline(task.id, task)` / `.cancel(task.id)`; priority-1 tasks also use `id + 10000`) and for any UI keys. Never use the list index for either — deleting a task shifts indices. When ids are missing on load, `_migrateNotificationIds()` cancels everything and reschedules. The widget's index-based toggle is the one remaining index dependency.
 
 **Recurrence** — when a recurring task (`TaskItem.recurrence != null`) is toggled done, `_HomeScreenState._toggle()` appends a cloned task (keeping priority, area, nextAction) with the next deadline. No separate recurring-task model.
+
+**AI (Claude Haiku 5.5)** — `lib/ai_service.dart` calls the Messages API over raw HTTP (`dart:io`, no Dart SDK) with `output_config.format` JSON schemas; the API key is entered in Settings and stored in SharedPreferences (`settings_ai_key`). Entry points: "ให้ AI ช่วยเลือก" in the morning plan (`home_plan.dart`), "✨ AI จัด" on inbox cards (`_aiTriage` in `home_inbox.dart`), "ให้ AI แตกขั้นตอน" in task detail, and "วิเคราะห์สัปดาห์" in the weekly summary. Task titles (including student names) are sent to the API only when the user taps these buttons.
 
 ## Models (`lib/models.dart`)
 

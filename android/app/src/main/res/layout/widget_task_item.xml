@@ -28,4 +28,14 @@
         android:maxLines="1"
         android:ellipsize="end" />
 
+    <TextView
+        android:id="@+id/task_meta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:textColor="#888888"
+        android:textSize="12sp"
+        android:maxLines="1"
+        android:visibility="gone" />
+
 </LinearLayout>

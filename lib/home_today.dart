@@ -29,28 +29,95 @@ extension _TodayTab on _HomeScreenState {
   }
 
   Widget _periodRow() {
-    const keys   = ['today', 'week', 'month', 'all'];
-    const labels = ['วันนี้', 'สัปดาห์นี้', 'เดือนนี้', 'ทั้งหมด'];
-    return Row(children: List.generate(keys.length, (i) {
-      final active = _period == keys[i];
-      return Padding(
-        padding: EdgeInsets.only(right: i < keys.length - 1 ? 8 : 0),
-        child: GestureDetector(
+    const keys   = ['all', 'today', 'week', 'month'];
+    const labels = ['ทั้งหมด', 'วันนี้', 'สัปดาห์', 'เดือน'];
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _cText.withValues(alpha: .06),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(children: List.generate(keys.length, (i) {
+        final active = _period == keys[i];
+        return Expanded(child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: () => _set(() => _period = keys[i]),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              color: active ? _cGold.withValues(alpha: .15) : _cText.withValues(alpha: .06),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: active ? _cGoldDark.withValues(alpha: .45) : _cText.withValues(alpha: .08)),
+              color: active ? _cText.withValues(alpha: .14) : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
             ),
-            child: Text(labels[i], style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-              color: active ? _cText : _cText.withValues(alpha: .5))),
+            child: Center(child: Text(labels[i], style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600,
+              color: active ? _cText : _cText.withValues(alpha: .45)))),
           ),
+        ));
+      })),
+    );
+  }
+
+  // หมวด (สอน/ส่วนตัว/บ้าน) ซ่อนไว้ในเมนู ไม่ต้องกินแถวของตัวเอง
+  // กรองตามแท็ก (ย่อไว้ในเมนูเหมือนหมวด)
+  Widget _tagMenu() {
+    // เฉพาะแท็กที่ติดอยู่กับงานจริง (ไม่รวมแท็กในรายการกลางที่ยังไม่มีงานใช้)
+    final used = {for (final t in _tasks) if (t.type == 'task' && t.archivedAt == null) ...t.tags};
+    if (_tagFilter.isNotEmpty && !used.contains(_tagFilter)) _tagFilter = ''; // ไม่มีงานไหนใช้แท็กนี้แล้ว
+    final tags = ['', ...Tags.list.where(used.contains), ...used.where((t) => !Tags.list.contains(t))];
+    final active = _tagFilter.isNotEmpty;
+    return PopupMenuButton<String>(
+      initialValue: _tagFilter,
+      color: _cSurf,
+      onSelected: (v) => _set(() => _tagFilter = v),
+      itemBuilder: (_) => [
+        for (final t in tags)
+          PopupMenuItem(value: t, child: Text(t.isEmpty ? 'ทุกแท็ก' : '#$t',
+            style: const TextStyle(fontSize: 14, color: _cText))),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          color: active ? _cGold.withValues(alpha: .15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? _cGoldDark.withValues(alpha: .45) : _cText.withValues(alpha: .12)),
         ),
-      );
-    }));
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(active ? '#$_tagFilter' : 'แท็ก', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600,
+            color: active ? _cText : _cText.withValues(alpha: .5))),
+          Icon(Icons.arrow_drop_down, size: 16, color: _cText.withValues(alpha: active ? .7 : .4)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _areaMenu() {
+    final areas = ['', ...Categories.list];
+    final active = _areaFilter.isNotEmpty;
+    return PopupMenuButton<String>(
+      initialValue: _areaFilter,
+      color: _cSurf,
+      onSelected: (v) => _set(() => _areaFilter = v),
+      itemBuilder: (_) => [
+        for (final a in areas)
+          PopupMenuItem(value: a, child: Text(a.isEmpty ? 'ทุกหมวด' : a,
+            style: const TextStyle(fontSize: 14, color: _cText))),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          color: active ? _cGreen.withValues(alpha: .15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? _cGreen.withValues(alpha: .4) : _cText.withValues(alpha: .12)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(active ? _areaFilter : 'ทุกหมวด', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600,
+            color: active ? _cGreenDark : _cText.withValues(alpha: .5))),
+          Icon(Icons.arrow_drop_down, size: 16, color: active ? _cGreenDark : _cText.withValues(alpha: .4)),
+        ]),
+      ),
+    );
   }
 
   Widget _todayContent() {
@@ -60,10 +127,16 @@ extension _TodayTab on _HomeScreenState {
       pending = pending.where((i) => _tasks[i].area == _areaFilter).toList();
       done    = done.where((i) => _tasks[i].area == _areaFilter).toList();
     }
-    // กบก่อน → วางแผนไว้วันนี้ → ลำดับอัตโนมัติ
-    pending = _rankForFocus(pending);
-    int pri(int i) => _tasks[i].isFrog ? 0 : _isPlannedToday(_tasks[i]) ? 1 : 2;
-    pending.sort((a, b) => pri(a).compareTo(pri(b))); // sort เสถียร: ลำดับเดิมคงไว้ในกลุ่มเดียวกัน
+    if (_tagFilter.isNotEmpty) {
+      pending = pending.where((i) => _tasks[i].tags.contains(_tagFilter)).toList();
+      done    = done.where((i) => _tasks[i].tags.contains(_tagFilter)).toList();
+    }
+    // งานใหม่ล่าสุดอยู่บนสุด (เวลาสร้างเท่ากัน = อันที่อยู่ท้ายลิสต์ใหม่กว่า) · แท็บ "วันนี้" ปักกบไว้บนสุด
+    pending.sort((a, b) {
+      if (_period == 'today' && _tasks[a].isFrog != _tasks[b].isFrog) return _tasks[a].isFrog ? -1 : 1;
+      final c = _tasks[b].createdAt.compareTo(_tasks[a].createdAt);
+      return c != 0 ? c : b.compareTo(a);
+    });
     final inbox = _inboxIdx;
     const periodLabel = {'today': 'วันนี้', 'week': 'สัปดาห์นี้', 'month': 'เดือนนี้', 'all': 'ทั้งหมด'};
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -74,10 +147,9 @@ extension _TodayTab on _HomeScreenState {
         const SizedBox(height: 10),
       ],
       _periodRow(),
-      const SizedBox(height: 10),
-      _areaFilterRow(),
-      const SizedBox(height: 12),
-      if (pending.isEmpty && done.isEmpty && inbox.isEmpty)
+      const SizedBox(height: 14),
+      // ว่างจริงๆ เท่านั้น (ไม่ใช่ว่างเพราะตัวกรอง) — ไม่งั้นปุ่มตัวกรองจะหายจนเปลี่ยนกลับไม่ได้
+      if (_pendingIdx.isEmpty && _doneIdx.isEmpty && inbox.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 40),
           child: Center(child: Text('ยังไม่มีงาน กด + เพื่อเพิ่ม',
@@ -86,20 +158,34 @@ extension _TodayTab on _HomeScreenState {
       else ...[
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           _sectionLabel('${periodLabel[_period]} · ${pending.length} งาน'),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _openMorningPlan,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-              child: Text('วางแผน', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGoldDark)),
+          Row(children: [
+            _areaMenu(),
+            _tagMenu(),
+            // ปุ่ม "วันนี้" = เปิดหน้าเลือกงานของวันนี้ (หน้าเดียวกับที่เด้งตอนเปิดแอพครั้งแรกของวัน) ได้ทุกเมื่อ
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _openMorningPlan,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _cGreen.withValues(alpha: .15),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _cGreen.withValues(alpha: .4)),
+                ),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.today_rounded, size: 14, color: _cGreenDark),
+                  SizedBox(width: 4),
+                  Text('วันนี้', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _cGreenDark)),
+                ]),
+              ),
             ),
-          ),
+          ]),
         ]),
         const SizedBox(height: 10),
         if (pending.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text('ไม่มีงานในช่วงนี้', style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .4))),
+            child: Text(_areaFilter.isEmpty && _tagFilter.isEmpty ? 'ไม่มีงานในช่วงนี้' : 'ไม่มีงานที่ตรงกับตัวกรอง', style: TextStyle(fontSize: 13, color: _cText.withValues(alpha: .4))),
           ),
         ...pending.asMap().entries.map((e) => _staggered(e.key, _taskCard(e.value, done: false))),
         if (done.isNotEmpty) ...[
@@ -127,7 +213,7 @@ extension _TodayTab on _HomeScreenState {
                 const SizedBox(width: 10),
                 Expanded(child: Text(t.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _cText))),
                 GestureDetector(
-                  onTap: () { _set(() { t.tag = null; t.tagBg = null; t.tagColor = null; t.lastUpdatedAt = DateTime.now(); }); _saveTasks(); },
+                  onTap: () { _set(() { t.tags.remove('ติดตาม'); t.lastUpdatedAt = DateTime.now(); }); _saveTasks(); },
                   child: Text('อัปเดตแล้ว', style: TextStyle(fontSize: 11, color: _cGoldDark, fontWeight: FontWeight.w600)),
                 ),
               ]),
@@ -171,32 +257,6 @@ extension _TodayTab on _HomeScreenState {
     return sorted;
   }
 
-  Widget _areaFilterRow() {
-    const areas  = ['', 'สอน', 'ส่วนตัว', 'บ้าน'];
-    const labels = ['ทั้งหมด', 'สอน', 'ส่วนตัว', 'บ้าน'];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(children: List.generate(areas.length, (i) {
-        final active = _areaFilter == areas[i];
-        return GestureDetector(
-          onTap: () => _set(() => _areaFilter = areas[i]),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            margin: EdgeInsets.only(right: i < areas.length - 1 ? 7 : 0),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
-            decoration: BoxDecoration(
-              color: active ? _cGreen.withValues(alpha: .15) : _cText.withValues(alpha: .06),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: active ? _cGreen.withValues(alpha: .4) : _cText.withValues(alpha: .08)),
-            ),
-            child: Text(labels[i], style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600,
-              color: active ? _cGreenDark : _cText.withValues(alpha: .5))),
-          ),
-        );
-      })),
-    );
-  }
-
   // ── Task card ─────────────────────────────────────────────────────────────────
   Widget _staggered(int listIdx, Widget child) {
     final dur = Duration(milliseconds: 220 + listIdx * 50);
@@ -209,8 +269,9 @@ extension _TodayTab on _HomeScreenState {
   Widget _taskCard(int i, {required bool done}) {
     final t = _tasks[i];
     return GestureDetector(
+      onLongPress: done ? null : () => _cardMenu(t), // กดค้าง = เมนูย้ายไปไอเดีย
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) =>
-        TaskDetailScreen(
+        TaskDetailScreen(allTasks: _tasks, 
           task: t,
           taskIndex: i,
           onDelete: () {
@@ -263,9 +324,21 @@ extension _TodayTab on _HomeScreenState {
                     color: done ? _cText.withValues(alpha: .4) : _cText, height: 1.35,
                     decoration: done ? TextDecoration.lineThrough : null,
                     decorationColor: _cText.withValues(alpha: .4))),
-                  const SizedBox(height: 4),
-                  Text(t.meta, style: TextStyle(fontSize: 10.5,
-                    color: (!done && t.warn) ? _cRed : _cText.withValues(alpha: done ? .32 : .5))),
+                  if (t.slotStart != null && !done) ...[
+                    const SizedBox(height: 4),
+                    Text('🕘 ${t.slotStart!.day}/${t.slotStart!.month} · ${hm(t.slotStart!.hour * 60 + t.slotStart!.minute)}–${hm(t.slotStart!.hour * 60 + t.slotStart!.minute + t.slotMin)}',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _cGreenDark)),
+                  ],
+                  if (t.tags.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(t.tags.map((x) => '#$x').join('  '), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      color: _cGoldDark.withValues(alpha: done ? .5 : 1))),
+                  ],
+                  if (t.meta.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(t.meta, style: TextStyle(fontSize: 10.5,
+                      color: (!done && t.warn) ? _cRed : _cText.withValues(alpha: done ? .32 : .5))),
+                  ],
                   if (t.deadline != null && !done) ...[
                     const SizedBox(height: 5),
                     _deadlineBadge(t.deadline!),
@@ -274,50 +347,16 @@ extension _TodayTab on _HomeScreenState {
                     const SizedBox(height: 7),
                     _dueActions(t),
                   ],
-                  if (t.subTasks.isNotEmpty && !_expandedCards.contains(t.id)) ...[
+                  if (t.subTasks.isNotEmpty) ...[
                     const SizedBox(height: 5),
                     _subTaskProgress(t.subTasks),
                   ],
                 ])),
-                if (t.tag != null) ...[
+                if (!done) ...[
                   const SizedBox(width: 8),
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                    decoration: BoxDecoration(color: t.tagBg, borderRadius: BorderRadius.circular(999)),
-                    child: Text(t.tag!, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: t.tagColor))),
+                  _cardAreaChip(t),
                 ],
-                // expand toggle
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _set(() {
-                    if (_expandedCards.contains(t.id)) _expandedCards.remove(t.id);
-                    else _expandedCards.add(t.id);
-                  }),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 2, 0),
-                    child: Icon(
-                      _expandedCards.contains(t.id) ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                      size: 18, color: _cText.withValues(alpha: .28),
-                    ),
-                  ),
-                ),
               ]),
-              if (_expandedCards.contains(t.id)) ...[
-                Divider(color: _cText.withValues(alpha: .07), height: 18),
-                ...t.subTasks.map((s) => SubTaskTile(
-                  sub: s, depth: 0,
-                  onChanged: () { _saveTasks(); _set(() {}); },
-                  onDelete: () { _set(() => t.subTasks.remove(s)); _saveTasks(); },
-                )),
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () { _set(() => t.subTasks.add(SubTask(title: 'ขั้นตอนใหม่'))); _saveTasks(); },
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 4, bottom: 2, left: 2),
-                    child: Text('+ เพิ่มขั้นตอน',
-                      style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .3))),
-                  ),
-                ),
-              ],
             ]),
           ),
         ]),
@@ -325,7 +364,95 @@ extension _TodayTab on _HomeScreenState {
     );
   }
 
+  // ปุ่มเปลี่ยนหมวดท้ายการ์ดงาน (แตะส่วนอื่นของการ์ด = เปิดรายละเอียด)
+  Widget _cardAreaChip(TaskItem t) {
+    final areas = [...Categories.list, ''];
+    final has = t.area != null && t.area!.isNotEmpty;
+    return PopupMenuButton<String>(
+      color: _cSurf,
+      onSelected: (v) {
+        _set(() { t.area = v.isEmpty ? null : v; t.lastUpdatedAt = DateTime.now(); });
+        _saveTasks();
+        _updateWidget();
+      },
+      itemBuilder: (_) => [
+        for (final a in areas)
+          PopupMenuItem(value: a, child: Text(a.isEmpty ? 'ไม่ระบุหมวด' : a,
+            style: TextStyle(fontSize: 14, color: a == (t.area ?? '') ? _cGreenDark : _cText))),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: has ? _cGreen.withValues(alpha: .15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: has ? _cGreen.withValues(alpha: .4) : _cText.withValues(alpha: .15)),
+        ),
+        child: Text(has ? t.area! : '+ หมวด', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600,
+          color: has ? _cGreenDark : _cText.withValues(alpha: .4))),
+      ),
+    );
+  }
+
   // งานถึงวันทำแล้ว: ป้าย "วันนี้" + เลื่อน / ไม่ทำ
+  void _cardMenu(TaskItem t) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 24),
+        decoration: const BoxDecoration(color: _cSurf, borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Text(t.title, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _cText)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.ios_share_rounded, color: _cText),
+            title: const Text('แชร์ข้อมูลทั้งหมด (JSON)', style: TextStyle(fontSize: 14.5, color: _cText)),
+            subtitle: Text('รวมขั้นตอนย่อย แท็ก หมายเหตุ และไฟล์แนบ', style: TextStyle(fontSize: 12, color: _cText.withValues(alpha: .45))),
+            onTap: () { Navigator.pop(ctx); shareTask(t); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.sell_outlined, color: _cGoldDark),
+            title: const Text('ให้ AI ติดแท็ก', style: TextStyle(fontSize: 14.5, color: _cText)),
+            onTap: () { Navigator.pop(ctx); _aiTag(t); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.lightbulb_outline_rounded, color: _cGoldDark),
+            title: const Text('ย้ายไปไอเดีย', style: TextStyle(fontSize: 14.5, color: _cText)),
+            onTap: () { Navigator.pop(ctx); _moveToIdea(t); },
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ย้ายงานไปแท็บไอเดีย (ข้อมูลเดิมอยู่ครบ) · มีปุ่มเลิกทำ
+  void _moveToIdea(TaskItem t) {
+    final before = (t.plannedFor, t.isFrog);
+    _set(() {
+      t.type = 'idea';
+      t.plannedFor = null;
+      t.isFrog = false;
+      t.reviewCount = 0;
+      t.lastUpdatedAt = DateTime.now();
+    });
+    NotificationService.cancel(t.id);
+    _saveTasks();
+    _updateWidget();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('ย้าย "${t.title}" ไปไอเดียแล้ว'),
+      action: SnackBarAction(label: 'เลิกทำ', onPressed: () {
+        _set(() { t.type = 'task'; t.plannedFor = before.$1; t.isFrog = before.$2; });
+        NotificationService.scheduleDeadline(t.id, t);
+        _saveTasks();
+        _updateWidget();
+      }),
+    ));
+  }
+
   Widget _dueActions(TaskItem t) {
     Widget btn(String label, Color fg, VoidCallback onTap) => GestureDetector(
       behavior: HitTestBehavior.opaque,

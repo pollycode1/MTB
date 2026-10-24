@@ -192,6 +192,8 @@ class AddTaskActivity : Activity() {
                 put("done", false);  put("warn", false)
                 put("type", "task")
                 put("plannedFor", today)
+                put("createdAt", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date()))
+                put("aiTodo", true) // ให้แอพส่งให้ AI จัดหมวด/ความสำคัญตอนเปิดครั้งถัดไป
                 put("doneAt", JSONObject.NULL)
                 put("tag", JSONObject.NULL); put("tagBg", JSONObject.NULL); put("tagColor", JSONObject.NULL)
             })

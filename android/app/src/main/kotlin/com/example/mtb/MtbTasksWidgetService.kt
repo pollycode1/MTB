@@ -23,7 +23,10 @@ class TasksRemoteViewsFactory(
     private val widgetId: Int,
 ) : RemoteViewsService.RemoteViewsFactory {
 
-    private data class Row(val title: String, val done: Boolean, val idx: Int, val kind: String, val doneAt: String = "") // kind: inbox | idea | task
+    private data class Row(
+        val title: String, val done: Boolean, val idx: Int, val kind: String, // kind: inbox | idea | task
+        val doneAt: String = "", val meta: String = "", val overdue: Boolean = false, val createdAt: String = "",
+    )
     private var rows = listOf<Row>()
     private var currentTab = "task"
 
@@ -59,12 +62,43 @@ class TasksRemoteViewsFactory(
                     tab == "idea" && type == "idea" -> pending.add(Row(title, isDone, i, "idea"))
                     tab == "task" && type == "inbox" -> inbox.add(Row(title, false, i, "inbox"))
                     tab == "task" && type == "task" ->
-                        if (isDone) done.add(Row(title, true, i, "task", t.optString("doneAt", ""))) else pending.add(Row(title, false, i, "task"))
+                        if (isDone) done.add(Row(title, true, i, "task", t.optString("doneAt", "")))
+                        else {
+                            val (due, overdue) = dueLabel(t)
+                            val area = if (t.isNull("area")) "" else t.optString("area", "")
+                            pending.add(Row(title, false, i, "task", meta = listOf(area, due).filter { it.isNotEmpty() }.joinToString(" · "), overdue = overdue,
+                                createdAt = t.optString("createdAt", "")))
+                        }
                 }
             }
             // งานที่เสร็จล่าสุดอยู่บนสุดของกลุ่มเสร็จแล้ว (doneAt เป็น ISO จึงเทียบเป็นข้อความได้)
-            rows = inbox + pending + done.sortedByDescending { it.doneAt }
+            // งานใหม่ล่าสุดบนสุด (เหมือนในแอพ) · ข้อมูลเก่าไม่มี createdAt ใช้ลำดับในลิสต์แทน
+            rows = inbox + pending.sortedWith(compareByDescending<Row> { it.createdAt }.thenByDescending { it.idx }) +
+                done.sortedByDescending { it.doneAt }
         } catch (_: Exception) { rows = emptyList() }
+    }
+
+    // วันที่ที่ต้องทำ = plannedFor ?? deadline (เหมือนในแอพ) → "เกินกำหนด" / "วันนี้" / "พรุ่งนี้" / "อีก N วัน" / "12 พ.ย."
+    private fun dueLabel(t: org.json.JSONObject): Pair<String, Boolean> {
+        val raw = listOf("plannedFor", "deadline").map { if (t.isNull(it)) "" else t.optString(it, "") }
+            .firstOrNull { it.length >= 10 } ?: return "" to false
+        return try {
+            val y = raw.substring(0, 4).toInt(); val m = raw.substring(5, 7).toInt(); val d = raw.substring(8, 10).toInt()
+            val due = java.util.Calendar.getInstance().apply { clear(); set(y, m - 1, d) }
+            val now = java.util.Calendar.getInstance()
+            val today = java.util.Calendar.getInstance().apply {
+                clear(); set(now.get(java.util.Calendar.YEAR), now.get(java.util.Calendar.MONTH), now.get(java.util.Calendar.DAY_OF_MONTH))
+            }
+            val days = Math.round((due.timeInMillis - today.timeInMillis) / 86_400_000.0).toInt()
+            val months = arrayOf("ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค.")
+            when {
+                days < 0  -> "เกินกำหนด" to true
+                days == 0 -> "วันนี้" to false
+                days == 1 -> "พรุ่งนี้" to false
+                days <= 6 -> "อีก $days วัน" to false
+                else      -> "$d ${months[m - 1]}" to false
+            }
+        } catch (_: Exception) { "" to false }
     }
 
     override fun getCount()          = rows.size
@@ -124,6 +158,13 @@ class TasksRemoteViewsFactory(
                 val rv = RemoteViews(ctx.packageName, R.layout.widget_task_item)
                 rv.setTextViewText(R.id.task_title, row.title)
                 rv.setViewVisibility(R.id.task_check, View.VISIBLE)
+                if (row.meta.isEmpty()) {
+                    rv.setViewVisibility(R.id.task_meta, View.GONE)
+                } else {
+                    rv.setViewVisibility(R.id.task_meta, View.VISIBLE)
+                    rv.setTextViewText(R.id.task_meta, row.meta)
+                    rv.setTextColor(R.id.task_meta, Color.parseColor(if (row.overdue) "#D06050" else "#888888"))
+                }
                 if (row.done) {
                     rv.setTextColor(R.id.task_title, Color.parseColor("#44888888"))
                     rv.setImageViewResource(R.id.task_check, R.drawable.widget_checkbox_done)
