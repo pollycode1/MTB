@@ -24,7 +24,9 @@ class TasksRemoteViewsFactory(
 ) : RemoteViewsService.RemoteViewsFactory {
 
     private data class Row(
+        // id = TaskItem.id ใช้ระบุงานตอนกด · idx ใช้เรียงข้อมูลเก่าที่ไม่มี createdAt เท่านั้น
         val title: String, val done: Boolean, val idx: Int, val kind: String, // kind: inbox | idea | task
+        val id: Long = -1,
         val doneAt: String = "", val meta: String = "", val overdue: Boolean = false, val createdAt: String = "",
     )
     private var rows = listOf<Row>()
@@ -58,15 +60,16 @@ class TasksRemoteViewsFactory(
                 val type = t.optString("type", "task")
                 val title = t.optString("title", "")
                 val isDone = t.optBoolean("done", false)
+                val id = t.optLong("id", -1)
                 when {
-                    tab == "idea" && type == "idea" -> pending.add(Row(title, isDone, i, "idea"))
-                    tab == "task" && type == "inbox" -> inbox.add(Row(title, false, i, "inbox"))
+                    tab == "idea" && type == "idea" -> pending.add(Row(title, isDone, i, "idea", id))
+                    tab == "task" && type == "inbox" -> inbox.add(Row(title, false, i, "inbox", id))
                     tab == "task" && type == "task" ->
-                        if (isDone) done.add(Row(title, true, i, "task", t.optString("doneAt", "")))
+                        if (isDone) done.add(Row(title, true, i, "task", id, t.optString("doneAt", "")))
                         else {
                             val (due, overdue) = dueLabel(t)
                             val area = if (t.isNull("area")) "" else t.optString("area", "")
-                            pending.add(Row(title, false, i, "task", meta = listOf(area, due).filter { it.isNotEmpty() }.joinToString(" · "), overdue = overdue,
+                            pending.add(Row(title, false, i, "task", id, meta = listOf(area, due).filter { it.isNotEmpty() }.joinToString(" · "), overdue = overdue,
                                 createdAt = t.optString("createdAt", "")))
                         }
                 }
@@ -117,20 +120,20 @@ class TasksRemoteViewsFactory(
                 val rv = RemoteViews(ctx.packageName, R.layout.widget_inbox_item)
                 rv.setTextViewText(R.id.task_title, row.title)
                 rv.setOnClickFillInIntent(R.id.inbox_btn_task, Intent().apply {
-                    putExtra(MtbTasksWidget.EXTRA_IDX, row.idx)
+                    putExtra(MtbTasksWidget.EXTRA_ID, row.id)
                     putExtra(MtbTasksWidget.EXTRA_ACTION, "to_task")
                 })
                 rv.setOnClickFillInIntent(R.id.inbox_btn_idea, Intent().apply {
-                    putExtra(MtbTasksWidget.EXTRA_IDX, row.idx)
+                    putExtra(MtbTasksWidget.EXTRA_ID, row.id)
                     putExtra(MtbTasksWidget.EXTRA_ACTION, "to_idea")
                 })
                 rv.setOnClickFillInIntent(R.id.inbox_btn_delete, Intent().apply {
-                    putExtra(MtbTasksWidget.EXTRA_IDX, row.idx)
+                    putExtra(MtbTasksWidget.EXTRA_ID, row.id)
                     putExtra(MtbTasksWidget.EXTRA_ACTION, "delete")
                 })
                 // แตะชื่อ = no-op (ให้ใช้ปุ่มแทน)
                 rv.setOnClickFillInIntent(R.id.task_row, Intent().apply {
-                    putExtra(MtbTasksWidget.EXTRA_IDX, -1)
+                    putExtra(MtbTasksWidget.EXTRA_ID, -1L)
                 })
                 rv
             }
@@ -141,14 +144,14 @@ class TasksRemoteViewsFactory(
                 val rv = RemoteViews(ctx.packageName, R.layout.widget_idea_item)
                 rv.setTextViewText(R.id.task_title, row.title)
                 val openUri = Uri.Builder().scheme("mtb").authority("idea")
-                    .appendQueryParameter("t", row.title).build()
+                    .appendQueryParameter("id", row.id.toString()).build()
                 val openFill = Intent().apply { data = openUri }
                 // ตั้งทั้ง row และ title TextView (บาง device LinearLayout ไม่กิน click)
                 rv.setOnClickFillInIntent(R.id.task_row, openFill)
                 rv.setOnClickFillInIntent(R.id.task_title, openFill)
-                // กด ✕ → mtb://idea-del?t=TITLE
+                // กด ✕ → mtb://idea-del?id=ID
                 val delUri = Uri.Builder().scheme("mtb").authority("idea-del")
-                    .appendQueryParameter("t", row.title).build()
+                    .appendQueryParameter("id", row.id.toString()).build()
                 rv.setOnClickFillInIntent(R.id.idea_btn_delete, Intent().apply { data = delUri })
                 rv
             }
@@ -174,11 +177,11 @@ class TasksRemoteViewsFactory(
                 }
                 // ติ๊กได้เฉพาะช่องสี่เหลี่ยม · แตะชื่อ/แถว = เปิดหน้ารายละเอียดงานในแอพ
                 rv.setOnClickFillInIntent(R.id.task_check, Intent().apply {
-                    putExtra(MtbTasksWidget.EXTRA_IDX, row.idx)
+                    putExtra(MtbTasksWidget.EXTRA_ID, row.id)
                 })
                 val openFill = Intent().apply {
+                    putExtra(MtbTasksWidget.EXTRA_ID, row.id)
                     putExtra(MtbTasksWidget.EXTRA_ACTION, "open")
-                    putExtra(MtbTasksWidget.EXTRA_TITLE, row.title)
                 }
                 rv.setOnClickFillInIntent(R.id.task_row, openFill)
                 rv.setOnClickFillInIntent(R.id.task_title, openFill)

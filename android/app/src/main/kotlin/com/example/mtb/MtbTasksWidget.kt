@@ -21,29 +21,37 @@ class MtbTasksWidget : AppWidgetProvider() {
     companion object {
         const val ACTION_TOGGLE       = "com.example.mtb.TOGGLE_TASK"
         const val ACTION_SWITCH_TAB   = "com.example.mtb.SWITCH_TAB"
-        const val ACTION_INBOX_ACTION = "com.example.mtb.INBOX_ACTION"
-        const val ACTION_IDEA_ACTION  = "com.example.mtb.IDEA_ACTION"
-        const val EXTRA_IDX           = "task_idx"
+        const val EXTRA_ID            = "task_id" // TaskItem.id — ห้ามใช้ลำดับในลิสต์ (ลบ/เพิ่มงานแล้วลำดับเลื่อน)
         const val EXTRA_TAB           = "tab"
         const val EXTRA_WIDGET_ID     = "widget_id"
         const val EXTRA_ACTION        = "action"
-        const val EXTRA_TITLE         = "title"
 
         val TAB_IDS = mapOf(
             "task"    to R.id.tab_today,
             "idea"    to R.id.tab_idea,
         )
+
+        fun indexOfId(list: JSONArray, id: Long): Int =
+            (0 until list.length()).firstOrNull { list.getJSONObject(it).optLong("id", -1) == id } ?: -1
+
+        // แบบเดียวกับ TaskItem._genId ใน models.dart · ไม่ซ้ำกับงานที่มีอยู่
+        fun newId(list: JSONArray): Long {
+            val used = (0 until list.length()).map { list.getJSONObject(it).optLong("id", -1) }.toSet()
+            var id = 100000 + (System.currentTimeMillis() * 1000) % 1_000_000_000
+            while (id in used) id++
+            return id
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_TOGGLE -> {
-                val idx    = intent.getIntExtra(EXTRA_IDX, -1)
+                val id     = intent.getLongExtra(EXTRA_ID, -1)
                 val action = intent.getStringExtra(EXTRA_ACTION)
-                when (action) {
-                    null -> if (idx >= 0) toggleTask(context, idx)            // ติ๊กช่องสี่เหลี่ยม
-                    "open" -> openTaskInApp(context, intent.getStringExtra(EXTRA_TITLE))
-                    else -> if (idx >= 0) handleItemAction(context, idx, action) // ปุ่มของรายการรอคัดแยก
+                if (id >= 0) when (action) {
+                    null -> toggleTask(context, id)               // ติ๊กช่องสี่เหลี่ยม
+                    "open" -> openTaskInApp(context, id)
+                    else -> handleItemAction(context, id, action) // ปุ่มของรายการรอคัดแยก
                 }
             }
             ACTION_SWITCH_TAB -> {
@@ -55,47 +63,15 @@ class MtbTasksWidget : AppWidgetProvider() {
                     onUpdate(context, AppWidgetManager.getInstance(context), intArrayOf(widgetId))
                 }
             }
-            ACTION_INBOX_ACTION -> {
-                val idx    = intent.getIntExtra(EXTRA_IDX, -1)
-                val action = intent.getStringExtra(EXTRA_ACTION) ?: return
-                if (idx >= 0) handleItemAction(context, idx, action)
-            }
-            ACTION_IDEA_ACTION -> {
-                val idx    = intent.getIntExtra(EXTRA_IDX, -1)
-                val action = intent.getStringExtra(EXTRA_ACTION) ?: return
-                when (action) {
-                    "open" -> {
-                        val title = intent.getStringExtra(EXTRA_TITLE)
-                        val uri = if (!title.isNullOrEmpty())
-                            Uri.Builder().scheme("mtb").authority("idea")
-                                .appendQueryParameter("t", title).build()
-                        else Uri.parse("mtb://idea")
-                        // ใช้ PendingIntent.send() เลี่ยง background activity launch block (Android 12+)
-                        PendingIntent.getActivity(
-                            context, (9500 + (title?.hashCode() ?: 0)),
-                            Intent(context, MainActivity::class.java).apply {
-                                this.action = Intent.ACTION_VIEW
-                                data  = uri
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                            },
-                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                        ).send()
-                    }
-                    "delete" -> if (idx >= 0) handleItemAction(context, idx, "delete")
-                }
-            }
         }
         super.onReceive(context, intent)
     }
 
-    // เปิดหน้ารายละเอียดงานในแอพ: mtb://task?t=ชื่อ (ใช้ launch action ของ home_widget ให้ widgetClicked ทำงาน)
-    private fun openTaskInApp(context: Context, title: String?) {
-        if (title.isNullOrEmpty()) return
-        val uri = Uri.Builder().scheme("mtb").authority("task").appendQueryParameter("t", title).build()
+    // เปิดหน้ารายละเอียดงานในแอพ: mtb://task?id=รหัสงาน (ใช้ launch action ของ home_widget ให้ widgetClicked ทำงาน)
+    private fun openTaskInApp(context: Context, id: Long) {
+        val uri = Uri.Builder().scheme("mtb").authority("task").appendQueryParameter("id", id.toString()).build()
         PendingIntent.getActivity(
-            context, 9600 + title.hashCode(),
+            context, 9600 + id.hashCode(),
             Intent(context, MainActivity::class.java).apply {
                 action = "es.antonborri.home_widget.action.LAUNCH"
                 data   = uri
@@ -107,14 +83,14 @@ class MtbTasksWidget : AppWidgetProvider() {
 
     // ── Item actions (inbox convert / delete) ─────────────────────────────────
 
-    private fun handleItemAction(context: Context, idx: Int, action: String) {
-        // อ่านจาก HW data (ตรงกับ idx ที่ widget ใช้)
+    private fun handleItemAction(context: Context, id: Long, action: String) {
         val hw  = HomeWidgetPlugin.getData(context)
-        val raw = hw.getString("tasks_json", null) ?: return
         val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val raw = flutterPrefs.getString("flutter.tasks_json", null) ?: hw.getString("tasks_json", null) ?: return
         try {
             val list = JSONArray(raw)
-            if (idx >= list.length()) return
+            val idx  = indexOfId(list, id)
+            if (idx < 0) return
             when (action) {
                 "to_task", "to_idea" -> {
                     val task = list.getJSONObject(idx)
@@ -156,12 +132,13 @@ class MtbTasksWidget : AppWidgetProvider() {
 
     // ── Toggle task ───────────────────────────────────────────────────────────
 
-    private fun toggleTask(context: Context, idx: Int) {
+    private fun toggleTask(context: Context, id: Long) {
         val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val raw = flutterPrefs.getString("flutter.tasks_json", null) ?: return
         try {
             val list    = JSONArray(raw)
-            if (idx >= list.length()) return
+            val idx     = indexOfId(list, id)
+            if (idx < 0) return
             val task    = list.getJSONObject(idx)
             val wasDone = task.optBoolean("done", false)
             task.put("done", !wasDone)
@@ -242,11 +219,6 @@ class MtbTasksWidget : AppWidgetProvider() {
                         PendingIntent.FLAG_UPDATE_CURRENT or mutFlag
                     )
                 }
-                "inbox" -> PendingIntent.getBroadcast(
-                    context, 9000 + id,
-                    Intent(context, MtbTasksWidget::class.java).apply { action = ACTION_INBOX_ACTION },
-                    PendingIntent.FLAG_UPDATE_CURRENT or mutFlag
-                )
                 else -> PendingIntent.getBroadcast(
                     context, 9000 + id,
                     Intent(context, MtbTasksWidget::class.java).apply { action = ACTION_TOGGLE },

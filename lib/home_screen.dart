@@ -50,8 +50,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   int _tabIdx = 0;
   String _historyFilter = 'เดือนนี้';
   String _areaFilter = '';
-  String? _pendingIdeaTitle;
-  String? _pendingTaskTitle;
+  int? _pendingOpenId; // widget สั่งเปิดงานก่อนโหลดงานเสร็จ
   bool _tasksLoaded = false;
 
   final List<TaskItem> _tasks = [
@@ -95,15 +94,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _maybeShowMorningPlan();
       }
       Future.delayed(const Duration(milliseconds: 500), _updateWidget);
-      if (_pendingTaskTitle != null) {
-        final t = _pendingTaskTitle!;
-        _pendingTaskTitle = null;
-        _openIdeaByTitle(t, type: 'task');
-      }
-      if (_pendingIdeaTitle != null) {
-        final t = _pendingIdeaTitle!;
-        _pendingIdeaTitle = null;
-        _openIdeaByTitle(t);
+      if (_pendingOpenId != null) {
+        _openFromWidget(_pendingOpenId!);
+        _pendingOpenId = null;
       }
     });
     HomeWidget.initiallyLaunchedFromHomeWidget().then(_handleWidgetLaunch);
@@ -297,59 +290,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   List<int> get _escalatedWaitingIdx => List.generate(_tasks.length, (i) => i)
       .where((i) => _tasks[i].type == 'waiting' && _tasks[i].tags.contains('ติดตาม') && !_tasks[i].done && _tasks[i].archivedAt == null).toList();
 
-  void _openIdeaByTitle(String title, {String type = 'idea'}) {
+  void _openFromWidget(int id) {
     // ponytail: search after delay so _loadTasks() from didChangeAppLifecycleState can finish first
     Future.delayed(const Duration(milliseconds: 400), () {
       if (!mounted) return;
-      final idx = _tasks.indexWhere((t) => t.type == type && t.title == title);
-      if (idx < 0) return;
-      setState(() => _tabIdx = type == 'idea' ? 2 : 0);
-      Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(allTasks: _tasks, 
-        task: _tasks[idx],
-        taskIndex: idx,
-        onDelete: () {
-          NotificationService.cancel(_tasks[idx].id);
-          setState(() => _tasks.removeAt(idx));
-          _saveTasks();
-          _updateWidget();
-        },
-        onChanged: () { _saveTasks(); _updateWidget(); setState(() {}); },
-      ))).then((_) => setState(() {}));
+      final t = _tasks.where((t) => t.id == id).firstOrNull;
+      if (t == null) return;
+      setState(() => _tabIdx = t.type == 'idea' ? 2 : 0);
+      _openTaskDetail(t);
     });
   }
 
   void _handleWidgetLaunch(Uri? uri) {
     if (uri == null || !mounted) return;
+    final id = int.tryParse(uri.queryParameters['id'] ?? ''); // TaskItem.id จาก widget
     switch (uri.host) {
       case 'add':
         Future.delayed(const Duration(milliseconds: 400), () { if (mounted) _openInput(); });
-      case 'toggle':
-        final idx = int.tryParse(uri.pathSegments.firstOrNull ?? '');
-        if (idx != null && idx < _tasks.length) _toggle(idx);
-      case 'task':
-        setState(() => _tabIdx = 0);
-        final taskTitle = uri.queryParameters['t'];
-        if (taskTitle != null && taskTitle.isNotEmpty) {
+      case 'task' || 'idea':
+        setState(() => _tabIdx = uri.host == 'idea' ? 2 : 0);
+        if (id != null) {
           if (_tasksLoaded) {
-            _openIdeaByTitle(taskTitle, type: 'task');
+            _openFromWidget(id);
           } else {
-            _pendingTaskTitle = taskTitle;
+            _pendingOpenId = id;
           }
         }
-      case 'idea':
-        setState(() => _tabIdx = 2);
-        final title = uri.queryParameters['t'];
-        if (title != null && title.isNotEmpty) {
-          if (_tasksLoaded) _openIdeaByTitle(title);
-          else _pendingIdeaTitle = title;
-        }
       case 'idea-del':
-        final title = uri.queryParameters['t'];
-        if (title != null && title.isNotEmpty) {
-          final idx = _tasks.indexWhere((t) => t.type == 'idea' && t.title == title);
-          if (idx >= 0) {
-            NotificationService.cancel(_tasks[idx].id);
-            setState(() => _tasks.removeAt(idx));
+        if (id != null) {
+          final i = _tasks.indexWhere((t) => t.id == id);
+          if (i >= 0) {
+            NotificationService.cancel(id);
+            setState(() => _tasks.removeAt(i));
             _saveTasks();
             _updateWidget();
           }

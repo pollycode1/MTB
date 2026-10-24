@@ -213,6 +213,7 @@ class AddTaskActivity : Activity() {
             val today = String.format("%04d-%02d-%02dT00:00:00",
                 cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
             list.put(JSONObject().apply {
+                put("id", MtbTasksWidget.newId(list)) // มี id ตั้งแต่แรก widget จะได้ติ๊ก/เปิดงานนี้ได้ก่อนเปิดแอพ
                 put("title", title); put("meta", "")
                 put("done", false);  put("warn", false)
                 put("type", "task")
