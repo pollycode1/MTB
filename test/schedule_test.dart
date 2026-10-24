@@ -78,6 +78,32 @@ void main() {
     expect(parseScheduleJson('{"blocks":[]}').error, isNotNull);
   });
 
+  test('class reminders: 10 min before each block, count open tasks of that room, skip holidays', () {
+    Holidays.public = {'2026-10-27': 'หยุด'}; // อังคาร
+    final blocks = [
+      WeeklyBlock(weekday: 1, startMin: 8 * 60 + 30, endMin: 9 * 60 + 20, title: 'คณิต ม.2/3', kind: 'teach'),
+      WeeklyBlock(weekday: 2, startMin: 10 * 60, endMin: 11 * 60, title: 'คณิต ม.1/1', kind: 'teach'),
+      WeeklyBlock(weekday: 1, startMin: 7 * 60, endMin: 7 * 60 + 30, title: 'เวรประตู', kind: 'duty'),
+    ];
+    final tasks = [
+      TaskItem(title: 'ตรวจการบ้าน ม.2/3'),
+      TaskItem(title: 'คืนสมุด', tags: ['ม.2/3']),
+      TaskItem(title: 'เสร็จแล้ว ม.2/3', done: true),
+      TaskItem(title: 'ไอเดีย ม.2/3', type: 'idea'),
+      TaskItem(title: 'ม.2/30 อีกห้อง'),
+    ];
+    final now = DateTime(2026, 10, 26, 8, 25); // จันทร์ 08:25 → คาบ 08:30 เลยเวลาเตือนแล้ว
+    final r = classReminders(blocks, tasks, now, days: 8);
+    expect([for (final x in r) x.at], [
+      DateTime(2026, 11, 2, 6, 50),  // เวรจันทร์ถัดไป (วันนี้ 06:50 ผ่านไปแล้ว)
+      DateTime(2026, 11, 2, 8, 20),  // คาบจันทร์ถัดไป · อังคาร 27 วันหยุด ไม่มี
+    ]);
+    expect(r[1].title, 'อีก 10 นาทีสอน คณิต ม.2/3');
+    expect(r[1].body, 'งานค้างของห้องนี้ 2 งาน · ตรวจการบ้าน ม.2/3, คืนสมุด');
+    expect(r[0].title, 'อีก 10 นาที: เวรประตู');
+    Holidays.public = {};
+  });
+
   test('Thai holiday ics: keeps public holidays only, expands ranges', () {
     const ics = 'BEGIN:VCALENDAR\r\n'
         'BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261023\r\nDTEND;VALUE=DATE:20261024\r\n'

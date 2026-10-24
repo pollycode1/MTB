@@ -190,6 +190,40 @@ DateTime _step(DateTime from, String recurrence) => switch (recurrence) {
   );
 }
 
+// ── แจ้งเตือนก่อนคาบ ────────────────────────────────────────────────────────────────────────
+// ห้องในชื่อคาบ เช่น "คณิต ม.2/3" → "ม.2/3" ใช้นับงานค้างที่ชื่อ/แท็ก/หมายเหตุมีห้องนี้
+String? roomOf(String s) => RegExp(r'[มป]\.\s?\d+(/\d+)?').firstMatch(s)?.group(0)?.replaceAll(' ', '');
+
+bool _mentionsRoom(TaskItem t, String room) {
+  // ม.2/3 ต้องไม่ไปตรงกับ ม.2/30
+  final re = RegExp('${RegExp.escape(room)}(?!\\d)');
+  return [t.title, t.meta, ...t.tags].any((s) => re.hasMatch(s.replaceAll(' ', '')));
+}
+
+// เตือนก่อนเริ่มคาบ/งานพิเศษ [lead] นาที ใน [days] วันข้างหน้า (ข้ามวันหยุด) · คิดจำนวนงานค้างตอนตั้งเตือน
+// ponytail: ตั้งล่วงหน้าเป็นรายครั้ง (ข้อความเปลี่ยนตามงานค้าง) ไม่เปิดแอพเกิน [days] วันการเตือนจะหมด
+List<({DateTime at, String title, String body})> classReminders(
+    List<WeeklyBlock> blocks, List<TaskItem> tasks, DateTime now, {int days = 14, int lead = 10}) {
+  final open = tasks.where((t) => t.type == 'task' && !t.done && t.archivedAt == null).toList();
+  final out = <({DateTime at, String title, String body})>[];
+  for (var i = 0; i < days; i++) {
+    final day = DateTime(now.year, now.month, now.day + i);
+    for (final b in blocksOn(blocks, day, holiday: Holidays.nameOn(day) != null)) {
+      final at = DateTime(day.year, day.month, day.day, 0, b.startMin - lead);
+      if (!at.isAfter(now)) continue;
+      final room = roomOf(b.title);
+      final mine = room == null ? <TaskItem>[] : open.where((t) => _mentionsRoom(t, room)).toList();
+      out.add((
+        at: at,
+        title: b.kind == 'teach' ? 'อีก $lead นาทีสอน ${b.title}' : 'อีก $lead นาที: ${b.title}',
+        body: mine.isEmpty ? '${hm(b.startMin)}–${hm(b.endMin)}'
+            : 'งานค้างของห้องนี้ ${mine.length} งาน · ${mine.take(3).map((t) => t.title).join(', ')}',
+      ));
+    }
+  }
+  return out;
+}
+
 // ── งานในตาราง: งานที่ทำซ้ำจะโผล่ทุกรอบถัดไปจนกว่าจะติ๊กเสร็จ (ติ๊กแล้วแอพสร้างรอบถัดไปให้เอง) ───────
 bool _recurOn(TaskItem t, DateTime day) {
   final s = dateOnly(t.slotStart!);

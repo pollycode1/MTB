@@ -2,6 +2,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'models.dart';
+import 'schedule_data.dart';
 
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
@@ -85,6 +86,31 @@ class NotificationService {
   static Future<void> cancelAll() async {
     if (!_ready) return;
     await _plugin.cancelAll();
+  }
+
+  // ── แจ้งเตือนที่คิดจากข้อมูล (ก่อนคาบ ฯลฯ) id 20000–29999 · ลบของเดิมแล้วตั้งใหม่ทั้งชุด ─────
+  // เรียกตอนเปิดแอพ/กลับเข้าแอพ/ออกจากแอพ/ปิดหน้าตาราง ข้อความจะได้ตรงกับงานค้างล่าสุด
+  static const _derivedBase = 20000;
+
+  static Future<void> rescheduleDerived(List<TaskItem> tasks) async {
+    if (!_ready) return;
+    for (final p in await _plugin.pendingNotificationRequests()) {
+      if (p.id >= _derivedBase && p.id < _derivedBase + 10000) await _plugin.cancel(p.id);
+    }
+    var id = _derivedBase;
+    for (final r in classReminders(ScheduleStore.blocks, tasks, DateTime.now())) {
+      await _plugin.zonedSchedule(
+        id++, r.title, r.body,
+        tz.TZDateTime.from(r.at, tz.local),
+        const NotificationDetails(android: AndroidNotificationDetails(
+          'class_reminder', 'เตือนก่อนคาบ',
+          channelDescription: 'แจ้งก่อนเริ่มคาบสอน/งานพิเศษ 10 นาที พร้อมงานค้างของห้อง',
+          importance: Importance.high, priority: Priority.high,
+        )),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
   }
 
   // ตั้งแจ้งเตือนประจำ 2 อย่าง: รีวิวรายสัปดาห์ (9999) และวางแผนทุกเช้า (9998)
