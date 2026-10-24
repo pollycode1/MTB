@@ -80,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       _tasksLoaded = true;
       Tags.mergeFrom(_tasks);
       AutoBackup.run(_tasks);
+      NotificationService.rescheduleDerived(_tasks);
       _triageAiTodo();
       // เปิดจากแจ้งเตือนรีวิวรายสัปดาห์ → ไปหน้าสรุปก่อน แทนแผนเช้า
       final launch = await NotificationService.launchPayload();
@@ -137,7 +138,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       },
       onOpen: _openTaskDetail,
       onToggle: (t) { final i = _tasks.indexOf(t); if (i >= 0) _toggle(i); },
-    ))).then((_) { if (mounted) setState(() {}); });
+    ))).then((_) {
+      NotificationService.rescheduleDerived(_tasks); // ตารางสอนอาจถูกแก้
+      if (mounted) setState(() {});
+    });
   }
 
   void _openSearch() {
@@ -266,6 +270,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       _loadTasks().then((_) { _updateWidget(); _triageAiTodo(); });
     } else if (state == AppLifecycleState.paused && _tasksLoaded) {
       AutoBackup.run(_tasks); // สลับออกจากแอพ → อัปเดตไฟล์สำรองของวันนี้
+      NotificationService.rescheduleDerived(_tasks); // เตือนก่อนคาบใช้จำนวนงานค้างล่าสุด
     }
   }
 
