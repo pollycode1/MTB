@@ -47,6 +47,7 @@ extension _NotifsTab on _HomeScreenState {
       'weekly' => _openWeeklySummary,
       'plan' => _openMorningPlan,
       'lastyear' => _openLastYear,
+      'laundry' => _openLaundry,
       _ => task == null ? null : () => _openTaskDetail(task),
     };
     return GestureDetector(

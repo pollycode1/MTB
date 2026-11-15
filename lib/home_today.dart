@@ -140,6 +140,7 @@ extension _TodayTab on _HomeScreenState {
     final inbox = _inboxIdx;
     const periodLabel = {'today': 'วันนี้', 'week': 'สัปดาห์นี้', 'month': 'เดือนนี้', 'all': 'ทั้งหมด'};
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _laundryCard(),
       if (inbox.isNotEmpty) ...[
         _sectionLabel('รอคัดแยก · ${inbox.length} รายการ'),
         const SizedBox(height: 10),
@@ -498,5 +499,41 @@ extension _TodayTab on _HomeScreenState {
     return Row(children: [
       Text('$done/$total ขั้นตอน', style: TextStyle(fontSize: 10, color: _cText.withValues(alpha: .4), fontFamily: _kMono)),
     ]);
+  }
+
+  // วันเสาร์ หรือกำลังซักอยู่ → การ์ดซักผ้าบนสุด
+  Widget _laundryCard() {
+    final now = DateTime.now();
+    final st = Laundry.status(now);
+    if (st.phase == LaundryPhase.idle && now.weekday != DateTime.saturday) return const SizedBox.shrink();
+    final mins = (st.left(now).inSeconds / 60).ceil();
+    final text = switch (st.phase) {
+      LaundryPhase.idle => 'วันนี้วันซักผ้า · กดเพื่อเริ่มปล่อยน้ำเข้า',
+      LaundryPhase.filling => 'กำลังปล่อยน้ำเข้า · อีก $mins นาที',
+      LaundryPhase.waitWaterOff => 'ปิดน้ำหรือยัง? กดเพื่อยืนยัน',
+      LaundryPhase.soak => 'กำลังแช่ผ้า · อีก $mins นาที',
+      LaundryPhase.spin => 'กำลังปั่น · อีก $mins นาที',
+      LaundryPhase.drain => 'กำลังปล่อยน้ำออก · อีก $mins นาที',
+      LaundryPhase.done => 'ซักผ้าเสร็จแล้ว ✅',
+    };
+    final alert = st.phase == LaundryPhase.waitWaterOff;
+    return GestureDetector(
+      onTap: _openLaundry,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: alert ? _cRed.withValues(alpha: .15) : _cSurf,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: alert ? _cRed.withValues(alpha: .5) : _cText.withValues(alpha: .08)),
+        ),
+        child: Row(children: [
+          Icon(Icons.local_laundry_service_outlined, size: 18, color: _cText.withValues(alpha: .7)),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: _cText.withValues(alpha: .9)))),
+          Icon(Icons.chevron_right_rounded, size: 18, color: _cText.withValues(alpha: .35)),
+        ]),
+      ),
+    );
   }
 }

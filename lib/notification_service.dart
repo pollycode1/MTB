@@ -5,6 +5,7 @@ import 'models.dart';
 import 'notif_log.dart';
 import 'schedule_data.dart';
 import 'last_year_screen.dart' show lastYearReminders;
+import 'laundry.dart';
 
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
@@ -13,6 +14,8 @@ class NotificationService {
   static void Function()? onWeeklyTap;
   static void Function()? onPlanTap;
   static void Function()? onLastYearTap;
+  static void Function()? onLaundryTap;
+  static void Function()? onLaundryWaterOff; // กด "ปิดน้ำแล้ว" ในแจ้งเตือน
   static const planReminderHour = 7; // เตือนวางแผนทุกวัน 07:00
 
   static Future<void> init() async {
@@ -21,6 +24,11 @@ class NotificationService {
     await _plugin.initialize(
       const InitializationSettings(android: android),
       onDidReceiveNotificationResponse: (r) {
+        if (r.actionId == _waterOffAction) {
+          onLaundryWaterOff?.call();
+          return;
+        }
+        if (r.payload == 'laundry') onLaundryTap?.call();
         if (r.payload == 'weekly') onWeeklyTap?.call();
         if (r.payload == 'plan') onPlanTap?.call();
         if (r.payload == 'lastyear') onLastYearTap?.call();
@@ -35,10 +43,12 @@ class NotificationService {
     _ready = true;
   }
 
-  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | null)
+  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | 'laundry' | 'laundry_water_off' | null)
   static Future<String?> launchPayload() async {
     final d = await _plugin.getNotificationAppLaunchDetails();
-    return d?.didNotificationLaunchApp == true ? d?.notificationResponse?.payload : null;
+    if (d?.didNotificationLaunchApp != true) return null;
+    final r = d!.notificationResponse;
+    return r?.actionId == _waterOffAction ? 'laundry_water_off' : r?.payload;
   }
 
   // priority 1=สูง → แจ้ง 24h+1h ก่อน, 2=กลาง → 3h ก่อน, 3=ต่ำ → 1h ก่อน
@@ -145,10 +155,11 @@ class NotificationService {
     await NotifLog.save();
   }
 
-  // ตั้งแจ้งเตือนประจำ 2 อย่าง: รีวิวรายสัปดาห์ (9999) และวางแผนทุกเช้า (9998)
+  // ตั้งแจ้งเตือนประจำ 3 อย่าง: รีวิวรายสัปดาห์ (9999) วางแผนทุกเช้า (9998) และวันซักผ้าทุกเสาร์ (9997)
   static Future<void> scheduleWeeklyReview() async {
     if (!_ready) return;
     await _schedulePlanReminder();
+    await _scheduleLaundryDay();
     await _plugin.cancel(9999);
     final now = DateTime.now();
     final daysUntil = (7 - now.weekday) % 7;
@@ -196,6 +207,79 @@ class NotificationService {
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
       payload: 'plan',
+    );
+  }
+
+  // ── ซักผ้า ─────────────────────────────────────────────────────────────────
+  // 9990 = ปล่อยน้ำเข้าครบ (มีปุ่มปิดน้ำแล้ว) · 9991–9993 = ถามซ้ำทุก 2 นาทีถ้ายังไม่กด
+  // 9994–9996 = แช่/ปั่น/ปล่อยน้ำออกครบ · 9997 = เตือนวันซักผ้าทุกเสาร์
+  static const _waterOffAction = 'water_off';
+  static const _laundryFillId = 9990, _laundryNagCount = 3, _laundryWashId = 9994, laundryDayId = 9997;
+
+  static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false}) async {
+    NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
+    await _plugin.zonedSchedule(
+      id, title, body,
+      tz.TZDateTime.from(at, tz.local),
+      NotificationDetails(android: AndroidNotificationDetails(
+        'laundry_timer', 'จับเวลาซักผ้า',
+        channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา',
+        importance: Importance.max, priority: Priority.max,
+        category: AndroidNotificationCategory.alarm,
+        actions: askWaterOff
+            ? const [AndroidNotificationAction(_waterOffAction, 'ปิดน้ำแล้ว ✓', showsUserInterface: true, cancelNotification: true)]
+            : null,
+      )),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      payload: 'laundry',
+    );
+  }
+
+  static Future<void> scheduleLaundryFill(DateTime end) async {
+    if (!_ready) return;
+    await _laundryAt(_laundryFillId, end, laundryFill.endTitle, laundryFill.endBody, askWaterOff: true);
+    for (var i = 1; i <= _laundryNagCount; i++) {
+      await _laundryAt(_laundryFillId + i, end.add(Duration(minutes: 2 * i)),
+          '🚰 ยังไม่ได้ปิดน้ำ?', 'ปล่อยน้ำเข้าเกินมา ${2 * i} นาทีแล้ว', askWaterOff: true);
+    }
+    await NotifLog.save();
+  }
+
+  static Future<void> scheduleLaundryWash(List<(LaundryStep, DateTime)> ends) async {
+    if (!_ready) return;
+    var id = _laundryWashId;
+    for (final (s, at) in ends) {
+      await _laundryAt(id++, at, s.endTitle, s.endBody);
+    }
+    await NotifLog.save();
+  }
+
+  // ยกเลิกตัวจับเวลาซักผ้าทั้งหมด (ไม่รวมเตือนวันเสาร์) + ปิดแจ้งเตือนที่ค้างอยู่บนเครื่อง
+  static Future<void> cancelLaundry() async {
+    if (!_ready) return;
+    for (var id = _laundryFillId; id < laundryDayId; id++) {
+      await _plugin.cancel(id);
+    }
+    NotifLog.removeFuture((x) => x >= _laundryFillId && x < laundryDayId);
+    await NotifLog.save();
+  }
+
+  static Future<void> _scheduleLaundryDay() async {
+    await _plugin.cancel(laundryDayId);
+    await _plugin.zonedSchedule(
+      laundryDayId,
+      '🧺 วันนี้วันซักผ้า',
+      'กดเพื่อเริ่มปล่อยน้ำเข้า 5 นาที',
+      tz.TZDateTime.from(nextSaturday(DateTime.now(), laundryHour), tz.local),
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'laundry_day', 'วันซักผ้า (เสาร์)',
+        importance: Importance.defaultImportance, priority: Priority.defaultPriority,
+      )),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      payload: 'laundry',
     );
   }
 }
