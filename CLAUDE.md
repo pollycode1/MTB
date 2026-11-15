@@ -38,6 +38,8 @@ Single-screen Flutter app — no routing library, no state management package. E
 
 **Derived notifications** — `NotificationService.rescheduleDerived()` (ids 20000–29999) rebuilds class reminders (`classReminders()`, 10 min before each `WeeklyBlock`, open tasks matched by room like `ม.2/3`) and last-year reminders (`lastYearReminders()`) for the next 14 days; called on load, on pause and after the schedule screen closes. Every scheduled notification is also recorded in `NotifLog` (`lib/notif_log.dart`), which backs the แจ้งเตือน tab (index 5).
 
+**Laundry (ซักผ้า)** — `lib/laundry.dart` (logic + `Laundry` store, prefs `laundry_fill` / `laundry_wash`) and `lib/laundry_screen.dart` (opened from the header 🧺 icon, the Saturday card on the งาน tab, or a `laundry` notification). Only the two start times are stored; `laundryStatus()` derives the phase: fill 5 min → wait for "ปิดน้ำแล้ว" → soak 20 → spin 10 → drain 3. Notification ids: 9990 fill end + 9991–9993 nags every 2 min (both with the `water_off` action, `showsUserInterface: true`, handled via `onLaundryWaterOff` / `launchPayload() == 'laundry_water_off'`), 9994–9996 wash step ends, 9997 weekly Saturday 08:00 reminder (scheduled with the weekly review).
+
 ## Models (`lib/models.dart`)
 
 - `TaskItem` — serializable to/from JSON, including `id` and `subTasks`.
