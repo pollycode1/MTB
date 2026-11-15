@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="mtb"
-        android:name="${applicationName}"
+        android:name=".MtbApp"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
         <activity
@@ -50,6 +50,20 @@
             android:name=".MtbTasksWidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- หน้ารายงานแอพปิดเอง (process แยก จะได้ไม่ตายตามแอพหลัก) -->
+        <activity
+            android:name=".CrashReportActivity"
+            android:process=":report"
+            android:taskAffinity="com.example.mtb.report"
+            android:label="MTB รายงาน"
+            android:exported="true">
+            <!-- ไอคอนแยก เปิดได้แม้แอพหลักเด้งทันที (ชั่วคราว ระหว่างหาสาเหตุ) -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
 
         <!-- แชร์ข้อความจากแอพอื่น → กล่องรับ (ไม่มีหน้าจอ แสดงแค่ Toast) -->
         <activity

@@ -14,11 +14,14 @@ import 'laundry.dart';
 /// Appends an error to Download/MTB/mtb-crash.txt (the native side writes there too),
 /// so a crash on a phone without adb can still be read and sent back.
 void logCrash(String where, Object error, StackTrace? stack) {
-  try {
-    final dir = Directory('/storage/emulated/0/Download/MTB')..createSync(recursive: true);
-    File('${dir.path}/mtb-crash.txt').writeAsStringSync(
-        '--- ${DateTime.now()} dart $where\n$error\n$stack\n', mode: FileMode.append, flush: true);
-  } catch (_) {}
+  final line = '--- ${DateTime.now()} dart $where\n$error\n$stack\n';
+  // app files dir is always writable; the native side shows it after a crash
+  for (final path in ['/data/user/0/com.example.mtb/files', '/storage/emulated/0/Download/MTB']) {
+    try {
+      final dir = Directory(path)..createSync(recursive: true);
+      File('${dir.path}/mtb-crash.txt').writeAsStringSync(line, mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
 }
 
 /// One failing startup step must not keep the app from opening.
