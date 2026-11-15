@@ -30,11 +30,25 @@ android {
         versionName = flutter.versionName
     }
 
+    // A fixed release key (from the MTB_KEYSTORE / MTB_KEYSTORE_PASSWORD GitHub
+    // secrets, see .github/workflows/build-apk.yml) so every APK can be installed
+    // over the previous one. Without it, local builds fall back to the debug key.
+    val releaseStore = System.getenv("MTB_KEYSTORE_PATH")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = System.getenv("MTB_KEYSTORE_PASSWORD")
+                keyAlias = "mtb"
+                keyPassword = System.getenv("MTB_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseStore != null) "release" else "debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }

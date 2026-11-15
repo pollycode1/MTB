@@ -140,6 +140,7 @@ extension _TodayTab on _HomeScreenState {
     final inbox = _inboxIdx;
     const periodLabel = {'today': 'วันนี้', 'week': 'สัปดาห์นี้', 'month': 'เดือนนี้', 'all': 'ทั้งหมด'};
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      LaundryCard(onTap: _openLaundry), // วันเสาร์ หรือกำลังซักอยู่
       if (inbox.isNotEmpty) ...[
         _sectionLabel('รอคัดแยก · ${inbox.length} รายการ'),
         const SizedBox(height: 10),
