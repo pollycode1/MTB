@@ -46,10 +46,29 @@ void main() {
     expect(laundryRows.length, 7);
   });
 
-  test('next Saturday', () {
-    expect(nextSaturday(DateTime(2026, 11, 15, 12), 8), DateTime(2026, 11, 21, 8)); // อาทิตย์ → เสาร์หน้า
-    expect(nextSaturday(DateTime(2026, 11, 21, 7), 8), DateTime(2026, 11, 21, 8)); // เสาร์ก่อน 8 โมง = วันนี้
-    expect(nextSaturday(DateTime(2026, 11, 21, 8), 8), DateTime(2026, 11, 28, 8));
+  test('next laundry day', () {
+    const sat = DateTime.saturday;
+    expect(nextLaundryDay(DateTime(2026, 11, 15, 12), sat, 8), DateTime(2026, 11, 21, 8)); // อาทิตย์ → เสาร์หน้า
+    expect(nextLaundryDay(DateTime(2026, 11, 21, 7), sat, 8), DateTime(2026, 11, 21, 8)); // เสาร์ก่อน 8 โมง = วันนี้
+    expect(nextLaundryDay(DateTime(2026, 11, 21, 8), sat, 8), DateTime(2026, 11, 28, 8));
+    expect(nextLaundryDay(DateTime(2026, 11, 15, 12), DateTime.sunday, 18, 30), DateTime(2026, 11, 15, 18, 30));
+  });
+
+  test('custom laundry times change the timeline and notification text', () {
+    LaundrySettings.fromJson({'steps': {'fill1': 7, 'soak1': 30}, 'weekday': 7, 'hour': 9, 'minute': 15, 'nag': 3});
+    final fill = DateTime(2026, 11, 22, 9);
+    expect(laundryStatus(0, fill, null, fill.add(const Duration(minutes: 6))).phase, LaundryPhase.filling);
+    expect(laundryStatus(0, fill, null, fill.add(const Duration(minutes: 7))).phase, LaundryPhase.waitWaterOff);
+    final wash = fill.add(const Duration(minutes: 8));
+    expect(laundryWashEnds(0, wash).map((e) => e.$2).first, DateTime(2026, 11, 22, 9, 38));
+    expect(laundryEndText(0, laundryRounds[0].fill).$2, contains('แช่ผ้า 30 นาที'));
+    expect(laundryDayLabel(), 'วันอาทิตย์ 09:15');
+    final back = LaundrySettings.toJson();
+    LaundrySettings.fromJson({});
+    expect(laundryRounds[0].fill.minutes, 5);
+    LaundrySettings.fromJson(back);
+    expect([LaundrySettings.minutes['soak1'], LaundrySettings.nagEvery, LaundrySettings.weekday], [30, 3, 7]);
+    LaundrySettings.fromJson({});
   });
 
   test('notification log backfills the Saturday laundry reminder', () {
@@ -84,6 +103,20 @@ void main() {
     await tester.pump();
     expect(Laundry.status().phase, LaundryPhase.spin);
     await Laundry.reset();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('laundry settings: + raises a step, reset restores defaults', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    LaundrySettings.fromJson({});
+    await tester.pumpWidget(const MaterialApp(home: LaundrySettingsScreen()));
+    await tester.tap(find.byIcon(Icons.add_rounded).first); // ปล่อยน้ำเข้า รอบ 1
+    await tester.pump();
+    expect(laundryRounds[0].fill.minutes, 6);
+    expect(find.text('6 นาที'), findsOneWidget);
+    await tester.tap(find.text('คืนค่าเริ่มต้น'));
+    await tester.pump();
+    expect(laundryRounds[0].fill.minutes, 5);
     await tester.pumpWidget(const SizedBox());
   });
 }
