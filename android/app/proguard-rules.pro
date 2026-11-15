@@ -15,3 +15,11 @@
 -keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken
 # home_widget / app widgets
 -keep class com.example.mtb.** { *; }
+
+# WorkManager (used by a plugin) creates its Room database and workers by reflection;
+# R8 dropped WorkDatabase_Impl's constructor and the app crashed on launch
+# ("Failed to create an instance of androidx.work.impl.WorkDatabase").
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class androidx.work.** { *; }
+-keep class * extends androidx.work.ListenableWorker { <init>(android.content.Context, androidx.work.WorkerParameters); }
+-keep class * extends androidx.work.InputMerger { <init>(); }
