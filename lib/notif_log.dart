@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'laundry.dart' show laundryHour;
+import 'laundry.dart' show LaundrySettings, laundryRounds;
 
 // ประวัติแจ้งเตือน: แจ้งเตือนในเครื่องเด้งเองโดยแอพไม่รู้ตัว จึงจดทุกอันตอน "ตั้ง" ไว้
 // เวลาผ่านไปแล้ว = แจ้งแล้ว · ยกเลิก = ลบอันที่ยังไม่ถึงเวลา · แจ้งเตือนประจำ (แผนเช้า/รีวิว) เติมย้อนหลังตอนเปิดแอพ
@@ -49,7 +49,7 @@ class NotifLog {
     entries.removeWhere((e) => e.at.isAfter(n) && match(e.id));
   }
 
-  // แผนเช้า (ทุกวัน) วันซักผ้า (เสาร์ laundryHour) และรีวิวรายสัปดาห์ (อาทิตย์) ที่เด้งไปแล้วตั้งแต่ครั้งก่อน · ครั้งแรกเริ่มนับจากตอนนี้
+  // แผนเช้า (ทุกวัน) วันซักผ้า (LaundrySettings วัน/เวลา ค่าเริ่มต้นเสาร์ 08:00) และรีวิวรายสัปดาห์ (อาทิตย์) ที่เด้งไปแล้วตั้งแต่ครั้งก่อน · ครั้งแรกเริ่มนับจากตอนนี้
   static void backfillRepeating(DateTime now, {required int planHour}) {
     final from = seen ?? now;
     for (var d = DateTime(from.year, from.month, from.day); !d.isAfter(now); d = DateTime(d.year, d.month, d.day + 1)) {
@@ -57,9 +57,10 @@ class NotifLog {
       if (plan.isAfter(from) && !plan.isAfter(now)) {
         entries.add(NotifEntry(9998, plan, 'วางแผนวันนี้', 'เลือกงานที่จะทำวันนี้ และงานกบ 🐸', payload: 'plan'));
       }
-      final laundry = DateTime(d.year, d.month, d.day, laundryHour);
-      if (d.weekday == DateTime.saturday && laundry.isAfter(from) && !laundry.isAfter(now)) {
-        entries.add(NotifEntry(9997, laundry, '🧺 วันนี้วันซักผ้า', 'กดเพื่อเริ่มปล่อยน้ำเข้า 5 นาที', payload: 'laundry'));
+      final laundry = DateTime(d.year, d.month, d.day, LaundrySettings.hour, LaundrySettings.minute);
+      if (d.weekday == LaundrySettings.weekday && laundry.isAfter(from) && !laundry.isAfter(now)) {
+        entries.add(NotifEntry(9997, laundry, '🧺 วันนี้วันซักผ้า',
+            'กดเพื่อเริ่มปล่อยน้ำเข้า ${laundryRounds.first.fill.minutes} นาที', payload: 'laundry'));
       }
       final weekly = DateTime(d.year, d.month, d.day, 9);
       if (d.weekday == DateTime.sunday && weekly.isAfter(from) && !weekly.isAfter(now)) {
