@@ -17,6 +17,7 @@ class NotificationService {
   static void Function()? onLastYearTap;
   static void Function()? onLaundryTap;
   static void Function()? onLaundryWaterOff; // กด "ปิดน้ำแล้ว" ในแจ้งเตือน
+  static void Function()? onLaundryNextRound; // กด "เริ่มรอบ 2" ในแจ้งเตือน
   static const planReminderHour = 7; // เตือนวางแผนทุกวัน 07:00
 
   static Future<void> init() async {
@@ -27,6 +28,10 @@ class NotificationService {
       onDidReceiveNotificationResponse: (r) {
         if (r.actionId == _waterOffAction) {
           onLaundryWaterOff?.call();
+          return;
+        }
+        if (r.actionId == _nextRoundAction) {
+          onLaundryNextRound?.call();
           return;
         }
         if (r.payload == 'laundry') onLaundryTap?.call();
@@ -44,12 +49,16 @@ class NotificationService {
     _ready = true;
   }
 
-  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | 'laundry' | 'laundry_water_off' | null)
+  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | 'laundry' | 'laundry_water_off' | 'laundry_next_round' | null)
   static Future<String?> launchPayload() async {
     final d = await _plugin.getNotificationAppLaunchDetails();
     if (d?.didNotificationLaunchApp != true) return null;
     final r = d!.notificationResponse;
-    return r?.actionId == _waterOffAction ? 'laundry_water_off' : r?.payload;
+    return switch (r?.actionId) {
+      _waterOffAction => 'laundry_water_off',
+      _nextRoundAction => 'laundry_next_round',
+      _ => r?.payload,
+    };
   }
 
   // priority 1=สูง → แจ้ง 24h+1h ก่อน, 2=กลาง → 3h ก่อน, 3=ต่ำ → 1h ก่อน
@@ -214,20 +223,21 @@ class NotificationService {
 
   // ── ซักผ้า ─────────────────────────────────────────────────────────────────
   // 9990 = ปล่อยน้ำเข้าครบ (มีปุ่มปิดน้ำแล้ว) · 9991–9993 = ถามซ้ำทุก 2 นาทีถ้ายังไม่กด
-  // 9994–9996 = แช่/ปั่น/ปล่อยน้ำออกครบ · 9997 = เตือนวันซักผ้าทุกเสาร์
-  static const _waterOffAction = 'water_off';
+  // 9994–9996 = ขั้นหลังปิดน้ำครบ (รอบ 1 แช่/ปั่น/ปล่อยออก · รอบ 2 ปั่นกับน้ำยา/ปล่อยออก) — ทีละรอบ จึงใช้ id ซ้ำได้ · 9997 = เตือนวันซักผ้าทุกเสาร์
+  static const _waterOffAction = 'water_off', _nextRoundAction = 'next_round';
   static const _laundryFillId = 9990, _laundryNagCount = 3, _laundryWashId = 9994, laundryDayId = 9997;
 
-  static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false}) async {
+  static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false, bool nextRound = false}) async {
     NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
     final details = NotificationDetails(android: AndroidNotificationDetails(
       'laundry_timer', 'จับเวลาซักผ้า',
       channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา',
       importance: Importance.max, priority: Priority.max,
       category: AndroidNotificationCategory.alarm,
-      actions: askWaterOff
-          ? const [AndroidNotificationAction(_waterOffAction, 'ปิดน้ำแล้ว ✓', showsUserInterface: true, cancelNotification: true)]
-          : null,
+      actions: [
+        if (askWaterOff) const AndroidNotificationAction(_waterOffAction, 'ปิดน้ำแล้ว ✓', showsUserInterface: true, cancelNotification: true),
+        if (nextRound) const AndroidNotificationAction(_nextRoundAction, 'เริ่มรอบ 2 (เปิดน้ำแล้ว)', showsUserInterface: true, cancelNotification: true),
+      ],
     ));
     Future<void> schedule(AndroidScheduleMode mode) => _plugin.zonedSchedule(
       id, title, body, tz.TZDateTime.from(at, tz.local), details,
@@ -244,15 +254,15 @@ class NotificationService {
   }
 
   // [now] = ข้ามอันที่เลยเวลาไปแล้ว (ตอนตั้งใหม่ให้รอบที่ค้างอยู่)
-  static Future<void> scheduleLaundryFill(DateTime end, {DateTime? now}) async {
+  static Future<void> scheduleLaundryFill(LaundryStep fill, DateTime end, {DateTime? now}) async {
     if (!_ready) return;
     final n = now ?? DateTime.now();
     for (var i = 0; i <= _laundryNagCount; i++) {
       final at = end.add(Duration(minutes: 2 * i));
       if (!at.isAfter(n)) continue;
       await _laundryAt(_laundryFillId + i, at,
-          i == 0 ? laundryFill.endTitle : '🚰 ยังไม่ได้ปิดน้ำ?',
-          i == 0 ? laundryFill.endBody : 'ปล่อยน้ำเข้าเกินมา ${2 * i} นาทีแล้ว', askWaterOff: true);
+          i == 0 ? fill.endTitle : '🚰 ยังไม่ได้ปิดน้ำ?',
+          i == 0 ? fill.endBody : 'ปล่อยน้ำเข้าเกินมา ${2 * i} นาทีแล้ว', askWaterOff: true);
     }
     await NotifLog.save();
   }
@@ -262,7 +272,7 @@ class NotificationService {
     final n = now ?? DateTime.now();
     var id = _laundryWashId;
     for (final (s, at) in ends) {
-      if (at.isAfter(n)) await _laundryAt(id, at, s.endTitle, s.endBody);
+      if (at.isAfter(n)) await _laundryAt(id, at, s.endTitle, s.endBody, nextRound: s.nextRound);
       id++;
     }
     await NotifLog.save();
