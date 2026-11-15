@@ -551,7 +551,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       ]),
       Row(children: [
         GestureDetector(
-          onTap: _openLaundry,
+          onTap: _openLaundry, // เริ่มซักผ้าเองได้ทุกวัน (เสาร์มีการ์ด + แจ้งเตือนด้วย)
           child: Container(
             width: 36, height: 36,
             margin: const EdgeInsets.only(right: 8),

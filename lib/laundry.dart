@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_service.dart';
@@ -68,50 +69,75 @@ DateTime nextSaturday(DateTime now, int hour) {
 }
 
 class Laundry {
-  static const _fillPref = 'laundry_fill', _washPref = 'laundry_wash';
+  static const _pref = 'laundry_state'; // {"fill": iso, "wash": iso} เก็บคู่กันใน key เดียว
   static DateTime? fillAt, washAt;
   static final changed = ValueNotifier<int>(0); // หน้าซักผ้าฟังไว้ (กดปุ่มในแจ้งเตือนตอนเปิดหน้าอยู่)
+  static Future<void> _queue = Future.value();
+
+  // ทำทีละคำสั่ง: กดเริ่ม/ปิดน้ำ/ยกเลิกซ้อนกัน (เช่นกดในแจ้งเตือนกับในแอพพร้อมกัน) ไม่ให้สถานะกับแจ้งเตือนเพี้ยน
+  static Future<void> _serial(Future<void> Function() f) => _queue = _queue.then((_) => f()).catchError((_) {});
 
   static LaundryStatus status([DateTime? now]) => laundryStatus(fillAt, washAt, now ?? DateTime.now());
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    fillAt = DateTime.tryParse(p.getString(_fillPref) ?? '');
-    washAt = DateTime.tryParse(p.getString(_washPref) ?? '');
+    try {
+      final j = jsonDecode(p.getString(_pref) ?? '{}') as Map<String, dynamic>;
+      fillAt = DateTime.tryParse(j['fill'] as String? ?? '');
+      washAt = DateTime.tryParse(j['wash'] as String? ?? '');
+    } catch (_) {
+      fillAt = washAt = null;
+    }
     changed.value++;
   }
 
   static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
-    fillAt == null ? await p.remove(_fillPref) : await p.setString(_fillPref, fillAt!.toIso8601String());
-    washAt == null ? await p.remove(_washPref) : await p.setString(_washPref, washAt!.toIso8601String());
+    await p.setString(_pref, jsonEncode({
+      if (fillAt != null) 'fill': fillAt!.toIso8601String(),
+      if (washAt != null) 'wash': washAt!.toIso8601String(),
+    }));
     changed.value++;
   }
 
   // ขั้น 1: เริ่มปล่อยน้ำเข้า 5 นาที
-  static Future<void> startFill() async {
+  static Future<void> startFill() => _serial(() async {
     fillAt = DateTime.now();
     washAt = null;
     await _save();
     await NotificationService.cancelLaundry();
     await NotificationService.scheduleLaundryFill(fillAt!.add(Duration(minutes: laundryFill.minutes)));
-  }
+  });
 
-  // ขั้น 2: ปิดน้ำแล้ว → แช่/ปั่น/ปล่อยน้ำออก (กดซ้ำจากแจ้งเตือนเตือนซ้ำไม่เริ่มนับใหม่)
-  static Future<void> confirmWaterOff() async {
+  // ขั้น 2: ปิดน้ำแล้ว → แช่/ปั่น/ปล่อยน้ำออก
+  // รับเฉพาะตอนกำลังปล่อยน้ำเข้า/รอปิดน้ำ (กดแจ้งเตือนเก่าที่ค้าง หรือกดซ้ำ ไม่เริ่มรอบใหม่)
+  static Future<void> confirmWaterOff() => _serial(() async {
     await load();
-    if (washAt != null) return;
-    fillAt ??= DateTime.now();
+    final phase = status().phase;
+    if (phase != LaundryPhase.filling && phase != LaundryPhase.waitWaterOff) return;
     washAt = DateTime.now();
     await _save();
     await NotificationService.cancelLaundry();
     await NotificationService.scheduleLaundryWash(laundryWashEnds(washAt!));
-  }
+  });
 
-  static Future<void> reset() async {
+  static Future<void> reset() => _serial(() async {
     fillAt = null;
     washAt = null;
     await _save();
     await NotificationService.cancelLaundry();
-  }
+  });
+
+  // ตั้งแจ้งเตือนที่ยังไม่ถึงเวลาของรอบที่ค้างอยู่ใหม่ (หลังล้างแจ้งเตือนทั้งหมด/เปิดแอพ)
+  static Future<void> resync() => _serial(() async {
+    final now = DateTime.now();
+    switch (status(now).phase) {
+      case LaundryPhase.filling || LaundryPhase.waitWaterOff:
+        await NotificationService.scheduleLaundryFill(fillAt!.add(Duration(minutes: laundryFill.minutes)), now: now);
+      case LaundryPhase.soak || LaundryPhase.spin || LaundryPhase.drain:
+        await NotificationService.scheduleLaundryWash(laundryWashEnds(washAt!), now: now);
+      case LaundryPhase.idle || LaundryPhase.done:
+        break;
+    }
+  });
 }

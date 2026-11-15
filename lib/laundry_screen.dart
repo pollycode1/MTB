@@ -38,7 +38,7 @@ class _LaundryScreenState extends State<LaundryScreen> {
     final st = Laundry.status(now);
     final isSat = now.weekday == DateTime.saturday;
     final (headline, sub) = switch (st.phase) {
-      LaundryPhase.idle => (isSat ? 'วันนี้วันซักผ้า 🧺' : 'ซักผ้า', 'กดเริ่มเมื่อเปิดน้ำเข้าเครื่อง'),
+      LaundryPhase.idle => (isSat ? 'วันนี้วันซักผ้า 🧺' : 'ซักผ้า', 'เริ่มได้ทุกวัน กดตอนเปิดน้ำเข้าเครื่อง'),
       LaundryPhase.filling => (_mmss(st.left(now)), 'กำลังปล่อยน้ำเข้า'),
       LaundryPhase.waitWaterOff => ('ปิดน้ำหรือยัง?', 'ครบ 5 นาทีแล้ว ปิดน้ำแล้วกดปุ่มด้านล่าง'),
       LaundryPhase.soak => (_mmss(st.left(now)), 'กำลังแช่ผ้า'),
@@ -77,7 +77,7 @@ class _LaundryScreenState extends State<LaundryScreen> {
         _stepRow(1, laundryFill, st, now),
         for (final (i, s) in laundryWash.indexed) _stepRow(i + 2, s, st, now),
         const SizedBox(height: 16),
-        Text('ทุกวันเสาร์ 0$laundryHour:00 มีแจ้งเตือนวันซักผ้า · แต่ละขั้นครบเวลาจะแจ้งเตือน '
+        Text('กดเริ่มเองได้ทุกวัน (ปุ่ม 🧺 มุมบนของหน้าแรก) · ทุกวันเสาร์ 0$laundryHour:00 มีแจ้งเตือนวันซักผ้าด้วย · แต่ละขั้นครบเวลาจะแจ้งเตือน '
             'ตอนปล่อยน้ำเข้าครบกด "ปิดน้ำแล้ว" ในแจ้งเตือนได้เลย (ถ้ายังไม่กดจะถามซ้ำทุก 2 นาที)',
           style: TextStyle(fontSize: 11.5, height: 1.5, color: kCText.withValues(alpha: .4))),
       ]),
@@ -114,6 +114,70 @@ class _LaundryScreenState extends State<LaundryScreen> {
         Text(active ? _mmss(st.left(now)) : '${s.minutes} นาที',
           style: TextStyle(fontSize: 12.5, fontFamily: active ? kMono : null, color: kCText.withValues(alpha: .5))),
       ]),
+    );
+  }
+}
+
+// การ์ดบนแท็บงาน: วันเสาร์ หรือกำลังซักอยู่ · นับเวลาเองทุก 15 วิ (หน้าแรกไม่ได้ rebuild ตามเวลา)
+class LaundryCard extends StatefulWidget {
+  final VoidCallback onTap;
+  const LaundryCard({super.key, required this.onTap});
+  @override
+  State<LaundryCard> createState() => _LaundryCardState();
+}
+
+class _LaundryCardState extends State<LaundryCard> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    Laundry.changed.addListener(_refresh);
+    _tick = Timer.periodic(const Duration(seconds: 15), (_) => _refresh());
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    Laundry.changed.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() { if (mounted) setState(() {}); }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final st = Laundry.status(now);
+    if (st.phase == LaundryPhase.idle && now.weekday != DateTime.saturday) return const SizedBox.shrink();
+    final mins = (st.left(now).inSeconds / 60).ceil();
+    final text = switch (st.phase) {
+      LaundryPhase.idle => 'วันนี้วันซักผ้า · กดเพื่อเริ่มปล่อยน้ำเข้า',
+      LaundryPhase.filling => 'กำลังปล่อยน้ำเข้า · อีก $mins นาที',
+      LaundryPhase.waitWaterOff => 'ปิดน้ำหรือยัง? กดเพื่อยืนยัน',
+      LaundryPhase.soak => 'กำลังแช่ผ้า · อีก $mins นาที',
+      LaundryPhase.spin => 'กำลังปั่น · อีก $mins นาที',
+      LaundryPhase.drain => 'กำลังปล่อยน้ำออก · อีก $mins นาที',
+      LaundryPhase.done => 'ซักผ้าเสร็จแล้ว ✅',
+    };
+    final alert = st.phase == LaundryPhase.waitWaterOff;
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: alert ? kCRed.withValues(alpha: .15) : kCSurf,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: alert ? kCRed.withValues(alpha: .5) : kCText.withValues(alpha: .08)),
+        ),
+        child: Row(children: [
+          Icon(Icons.local_laundry_service_outlined, size: 18, color: kCText.withValues(alpha: .7)),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: kCText.withValues(alpha: .9)))),
+          Icon(Icons.chevron_right_rounded, size: 18, color: kCText.withValues(alpha: .35)),
+        ]),
+      ),
     );
   }
 }
