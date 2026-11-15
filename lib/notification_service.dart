@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -40,9 +41,11 @@ class NotificationService {
         if (r.payload == 'lastyear') onLastYearTap?.call();
       },
     );
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await androidImpl?.requestNotificationsPermission();
+    try {
+      await androidImpl?.deleteNotificationChannel('laundry_timer'); // แทนด้วย laundry_alarm
+    } catch (_) {}
     await NotifLog.load();
     NotifLog.backfillRepeating(DateTime.now(), planHour: planReminderHour);
     await NotifLog.save();
@@ -226,14 +229,28 @@ class NotificationService {
   // 9994–9996 = ขั้นหลังปิดน้ำครบ (รอบ 1 แช่/ปั่น/ปล่อยออก · รอบ 2 ปั่นกับน้ำยา/ปล่อยออก) — ทีละรอบ จึงใช้ id ซ้ำได้ · 9997 = เตือนวันซักผ้าทุกเสาร์
   static const _waterOffAction = 'water_off', _nextRoundAction = 'next_round';
   static const _laundryFillId = 9990, _laundryNagCount = 3, _laundryWashId = 9994, laundryDayId = 9997;
+  static const laundryAlarmVolume = 80; // % ของเสียงปลุก ระหว่างซักผ้า
+  static const _alarm = MethodChannel('mtb/alarm');
+  static const _insistent = 4; // Notification.FLAG_INSISTENT: เสียงวนจนกว่าจะกด/ปัดทิ้ง
+
+  /// ระหว่างซักผ้า ตั้งเสียงปลุกของเครื่องเป็น [laundryAlarmVolume]% (จำค่าเดิมไว้) · [on]=false คืนค่าเดิม
+  static Future<void> laundryVolume(bool on) async {
+    if (!_ready) return;
+    try {
+      await _alarm.invokeMethod(on ? 'boost' : 'restore', on ? laundryAlarmVolume : null);
+    } catch (_) {} // ทดสอบ/เครื่องไม่รองรับ
+  }
 
   static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false, bool nextRound = false}) async {
     NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
     final details = NotificationDetails(android: AndroidNotificationDetails(
-      'laundry_timer', 'จับเวลาซักผ้า',
-      channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา',
+      // ช่องเสียงปลุก: ดังแม้ปิดเสียง/โหมดสั่น และวนจนกว่าจะกด (ช่องเดิม laundry_timer ใช้เสียงแจ้งเตือนธรรมดา)
+      'laundry_alarm', 'ซักผ้า (เสียงปลุก)',
+      channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา ดังแม้ปิดเสียง วนจนกว่าจะกด',
       importance: Importance.max, priority: Priority.max,
       category: AndroidNotificationCategory.alarm,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+      additionalFlags: Int32List.fromList(const [_insistent]),
       actions: [
         if (askWaterOff) const AndroidNotificationAction(_waterOffAction, 'ปิดน้ำแล้ว ✓', showsUserInterface: true, cancelNotification: true),
         if (nextRound) const AndroidNotificationAction(_nextRoundAction, 'เริ่มรอบ 2 (เปิดน้ำแล้ว)', showsUserInterface: true, cancelNotification: true),

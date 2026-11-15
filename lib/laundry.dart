@@ -212,6 +212,7 @@ class Laundry {
     washAt = null;
     await _save();
     await NotificationService.cancelLaundry();
+    await NotificationService.laundryVolume(true);
     await NotificationService.scheduleLaundryFill(r, fillAt!.add(Duration(minutes: laundryRounds[r].fill.minutes)));
   }
 
@@ -237,6 +238,7 @@ class Laundry {
     washAt = DateTime.now();
     await _save();
     await NotificationService.cancelLaundry();
+    await NotificationService.laundryVolume(true);
     await NotificationService.scheduleLaundryWash(round, laundryWashEnds(round, washAt!));
   });
 
@@ -255,6 +257,7 @@ class Laundry {
     washAt = null;
     await _save();
     await NotificationService.cancelLaundry();
+    await NotificationService.laundryVolume(false);
   });
 
   // ตั้งแจ้งเตือนที่ยังไม่ถึงเวลาของรอบที่ค้างอยู่ใหม่ (หลังล้างแจ้งเตือนทั้งหมด/เปิดแอพ)
@@ -266,8 +269,11 @@ class Laundry {
         await NotificationService.scheduleLaundryFill(round, fillAt!.add(Duration(minutes: fill.minutes)), now: now);
       case LaundryPhase.soak || LaundryPhase.spin || LaundryPhase.drain:
         await NotificationService.scheduleLaundryWash(round, laundryWashEnds(round, washAt!), now: now);
-      case LaundryPhase.idle || LaundryPhase.betweenRounds || LaundryPhase.done:
+      case LaundryPhase.betweenRounds:
         break;
+      case LaundryPhase.idle || LaundryPhase.done:
+        await NotificationService.laundryVolume(false); // ซักเสร็จแล้ว → คืนเสียงปลุกเดิม
+        return;
     }
   });
 }

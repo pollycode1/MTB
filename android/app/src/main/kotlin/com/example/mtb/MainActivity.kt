@@ -2,7 +2,9 @@ package com.example.mtb
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import io.flutter.embedding.android.FlutterActivity
@@ -25,9 +27,34 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
     }
 
+    // ระหว่างซักผ้า: ตั้งเสียงปลุกเป็น x% (จำค่าเดิม) · restore = คืนค่าเดิม
+    private fun alarmVolume(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val prefs = getSharedPreferences("mtb_alarm", Context.MODE_PRIVATE)
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            when (call.method) {
+                "boost" -> {
+                    if (!prefs.contains("saved")) prefs.edit().putInt("saved", am.getStreamVolume(AudioManager.STREAM_ALARM)).apply()
+                    val pct = (call.arguments as? Int) ?: 80
+                    am.setStreamVolume(AudioManager.STREAM_ALARM, Math.round(max * pct / 100f).coerceIn(1, max), 0)
+                }
+                "restore" -> if (prefs.contains("saved")) {
+                    am.setStreamVolume(AudioManager.STREAM_ALARM, prefs.getInt("saved", max).coerceIn(0, max), 0)
+                    prefs.edit().remove("saved").apply()
+                }
+                else -> return result.notImplemented()
+            }
+            result.success(null)
+        } catch (e: Throwable) {
+            result.error("volume", e.toString(), null)
+        }
+    }
+
     // พิมพ์ด้วยเสียง: ใช้หน้าฟังเสียงของระบบ (Google) ไม่ต้องขอสิทธิ์ไมค์เอง · คืนข้อความหรือ null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mtb/alarm").setMethodCallHandler(::alarmVolume)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mtb/voice").setMethodCallHandler { call, result ->
             if (call.method != "listen") return@setMethodCallHandler result.notImplemented()
             pendingVoice?.success(null)

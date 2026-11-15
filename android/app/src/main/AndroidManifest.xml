@@ -57,13 +57,7 @@
             android:process=":report"
             android:taskAffinity="com.example.mtb.report"
             android:label="MTB รายงาน"
-            android:exported="true">
-            <!-- ไอคอนแยก เปิดได้แม้แอพหลักเด้งทันที (ชั่วคราว ระหว่างหาสาเหตุ) -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
+            android:exported="false" />
 
         <!-- แชร์ข้อความจากแอพอื่น → กล่องรับ (ไม่มีหน้าจอ แสดงแค่ Toast) -->
         <activity
