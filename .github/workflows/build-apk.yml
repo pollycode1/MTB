@@ -25,7 +25,17 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Release key
+        env:
+          MTB_KEYSTORE: ${{ secrets.MTB_KEYSTORE }}
+        run: |
+          # ไม่มีกุญแจถาวร = ไม่สร้าง เพื่อไม่ให้ได้ APK ที่ติดตั้งทับแอพเดิมไม่ได้
+          if [ -z "$MTB_KEYSTORE" ]; then echo "::error::ยังไม่ได้ตั้ง secret MTB_KEYSTORE"; exit 1; fi
+          echo "$MTB_KEYSTORE" | base64 -d > "$RUNNER_TEMP/mtb.p12"
+          echo "MTB_KEYSTORE_PATH=$RUNNER_TEMP/mtb.p12" >> "$GITHUB_ENV"
       - run: flutter build apk --release
+        env:
+          MTB_KEYSTORE_PASSWORD: ${{ secrets.MTB_KEYSTORE_PASSWORD }}
       - name: Tag name
         id: tag
         run: echo "tag=apk-$(echo '${{ github.ref_name }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"

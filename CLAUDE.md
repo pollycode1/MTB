@@ -50,3 +50,7 @@ Single-screen Flutter app — no routing library, no state management package. E
 - Widget → Flutter: `HomeWidget.widgetClicked` stream → `_handleWidgetLaunch` in `HomeScreen`
 - Flutter → Widget: `HomeWidget.saveWidgetData(key, value)` then `HomeWidget.updateWidget(androidName:)`
 - Notifications: called from `_toggle()`, `TaskDetailScreen._save()` / `_pickDeadline()` / `_clearDeadline()`, and the delete handlers
+
+## Release signing
+
+Release APKs are signed with a fixed key so updates install over each other: `android/app/build.gradle.kts` uses `MTB_KEYSTORE_PATH` + `MTB_KEYSTORE_PASSWORD` (alias `mtb`) when set, else the debug key. CI (`.github/workflows/build-apk.yml`) decodes the `MTB_KEYSTORE` secret (base64 PKCS12) and refuses to build without it. Never commit the keystore.
