@@ -3,6 +3,8 @@ package com.example.mtb
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.os.Bundle
+import java.io.File
 import android.speech.RecognizerIntent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -10,6 +12,12 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var pendingVoice: MethodChannel.Result? = null
+
+    // บันทึกแอพเด้งลง Download/MTB/mtb-crash.txt (และในโฟลเดอร์แอพ) เพื่อส่งให้ดูได้โดยไม่ต้องต่อคอม
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installCrashLog(this)
+        super.onCreate(savedInstanceState)
+    }
 
     // พิมพ์ด้วยเสียง: ใช้หน้าฟังเสียงของระบบ (Google) ไม่ต้องขอสิทธิ์ไมค์เอง · คืนข้อความหรือ null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -37,6 +45,21 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val VOICE_REQUEST = 7301
+        private var crashLogInstalled = false
+
+        fun installCrashLog(activity: Activity) {
+            if (crashLogInstalled) return
+            crashLogInstalled = true
+            val appDir = activity.getExternalFilesDir(null)
+            val previous = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+                val text = "--- ${java.util.Date()} native ${thread.name}\n${android.util.Log.getStackTraceString(e)}\n"
+                for (dir in listOfNotNull(File("/storage/emulated/0/Download/MTB"), appDir)) {
+                    try { dir.mkdirs(); File(dir, "mtb-crash.txt").appendText(text) } catch (_: Throwable) {}
+                }
+                previous?.uncaughtException(thread, e)
+            }
+        }
 
         fun voiceIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
