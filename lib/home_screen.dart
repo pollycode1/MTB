@@ -83,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     NotificationService.onLastYearTap = _openLastYear;
     NotificationService.onLaundryTap = _openLaundry;
     NotificationService.onLaundryWaterOff = () => Laundry.confirmWaterOff().then((_) => _openLaundry());
+    NotificationService.onLaundryNextRound = () => Laundry.startNextRound().then((_) => _openLaundry());
     _loadTasks().then((_) async {
       _tasksLoaded = true;
       Tags.mergeFrom(_tasks);
@@ -101,6 +102,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _openLaundry();
       } else if (launch == 'laundry_water_off') {
         Laundry.confirmWaterOff().then((_) => _openLaundry());
+      } else if (launch == 'laundry_next_round') {
+        Laundry.startNextRound().then((_) => _openLaundry());
       } else {
         _maybeShowMorningPlan();
       }
