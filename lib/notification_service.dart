@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -5,6 +6,7 @@ import 'models.dart';
 import 'notif_log.dart';
 import 'schedule_data.dart';
 import 'last_year_screen.dart' show lastYearReminders;
+import 'laundry.dart';
 
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
@@ -13,6 +15,10 @@ class NotificationService {
   static void Function()? onWeeklyTap;
   static void Function()? onPlanTap;
   static void Function()? onLastYearTap;
+  static void Function()? onLaundryTap;
+  static void Function()? onLaundryWaterOff; // กด "ปิดน้ำแล้ว" ในแจ้งเตือน
+  static void Function()? onLaundryNextStep; // กด "ไปขั้นต่อไป" ในแจ้งเตือน
+  static void Function()? onLaundryNextRound; // กด "เริ่มรอบ 2" ในแจ้งเตือน
   static const planReminderHour = 7; // เตือนวางแผนทุกวัน 07:00
 
   static Future<void> init() async {
@@ -21,6 +27,19 @@ class NotificationService {
     await _plugin.initialize(
       const InitializationSettings(android: android),
       onDidReceiveNotificationResponse: (r) {
+        if (r.actionId == _waterOffAction) {
+          onLaundryWaterOff?.call();
+          return;
+        }
+        if (r.actionId == _nextStepAction) {
+          onLaundryNextStep?.call();
+          return;
+        }
+        if (r.actionId == _nextRoundAction) {
+          onLaundryNextRound?.call();
+          return;
+        }
+        if (r.payload == 'laundry') onLaundryTap?.call();
         if (r.payload == 'weekly') onWeeklyTap?.call();
         if (r.payload == 'plan') onPlanTap?.call();
         if (r.payload == 'lastyear') onLastYearTap?.call();
@@ -35,10 +54,17 @@ class NotificationService {
     _ready = true;
   }
 
-  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | null)
+  // payload ของแจ้งเตือนที่เปิดแอพขึ้นมาตอนปิดอยู่ ('weekly' | 'plan' | 'lastyear' | 'laundry' | 'laundry_water_off' | 'laundry_next_round' | null)
   static Future<String?> launchPayload() async {
     final d = await _plugin.getNotificationAppLaunchDetails();
-    return d?.didNotificationLaunchApp == true ? d?.notificationResponse?.payload : null;
+    if (d?.didNotificationLaunchApp != true) return null;
+    final r = d!.notificationResponse;
+    return switch (r?.actionId) {
+      _waterOffAction => 'laundry_water_off',
+      _nextStepAction => 'laundry_next_step',
+      _nextRoundAction => 'laundry_next_round',
+      _ => r?.payload,
+    };
   }
 
   // priority 1=สูง → แจ้ง 24h+1h ก่อน, 2=กลาง → 3h ก่อน, 3=ต่ำ → 1h ก่อน
@@ -145,10 +171,12 @@ class NotificationService {
     await NotifLog.save();
   }
 
-  // ตั้งแจ้งเตือนประจำ 2 อย่าง: รีวิวรายสัปดาห์ (9999) และวางแผนทุกเช้า (9998)
+  // ตั้งแจ้งเตือนประจำ 3 อย่าง: รีวิวรายสัปดาห์ (9999) วางแผนทุกเช้า (9998) และวันซักผ้าทุกเสาร์ (9997)
   static Future<void> scheduleWeeklyReview() async {
     if (!_ready) return;
     await _schedulePlanReminder();
+    await _scheduleLaundryDay();
+    await Laundry.resync(); // ล้างแจ้งเตือนทั้งหมดมา → ตั้งของรอบซักผ้าที่ค้างอยู่กลับ
     await _plugin.cancel(9999);
     final now = DateTime.now();
     final daysUntil = (7 - now.weekday) % 7;
@@ -196,6 +224,166 @@ class NotificationService {
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
       payload: 'plan',
+    );
+  }
+
+  // ── ซักผ้า ─────────────────────────────────────────────────────────────────
+  // 9988 = สถานะนับถอยหลังค้างไว้ใน status bar ของขั้นที่กำลังทำอยู่ (เงียบ ไม่มีเสียง/ปุ่ม อัปเดต/แทนที่ตอนเปลี่ยนขั้น)
+  // 9990 = ปล่อยน้ำเข้าครบ (มีปุ่มปิดน้ำแล้ว) · 9991–9993 = ถามซ้ำทุก nagEvery นาทีถ้ายังไม่กด
+  // 9994 = ขั้นซักปัจจุบันครบเวลา (มีปุ่ม "ไปขั้นต่อไป"/"เริ่มรอบ 2") · 9995–9996 = ถามซ้ำทุก nagEvery นาทีถ้ายังไม่กด
+  //   (จับเวลาทีละขั้น ครบแล้วรอกดก่อนไปขั้นต่อไป จึงมีขั้นเดียวค้างอยู่ตอนหนึ่งๆ ใช้ id ชุดเดียวซ้ำได้) · 9997 = เตือนวันซักผ้าทุกเสาร์
+  static const _waterOffAction = 'water_off', _nextStepAction = 'next_step', _nextRoundAction = 'next_round';
+  static const _laundryCountdownId = 9988;
+  static const _laundryFillId = 9990, _laundryNagCount = 3, _laundryWashId = 9994, _laundryWashNagCount = 2, laundryDayId = 9997;
+
+  // แจ้งเตือนค้างไว้ (ongoing) โชว์นาฬิกานับถอยหลังของขั้นที่กำลังทำอยู่ใน status bar · เงียบ ไม่ปลุก ไม่มีปุ่ม
+  static NotificationDetails _laundryCountdownDetails(DateTime end) => NotificationDetails(android: AndroidNotificationDetails(
+    'laundry_countdown', 'นับถอยหลังซักผ้า',
+    channelDescription: 'ค้างไว้ใน status bar ระหว่างจับเวลาแต่ละขั้น',
+    importance: Importance.low, priority: Priority.low,
+    playSound: false, enableVibration: false, ongoing: true, onlyAlertOnce: true,
+    showWhen: true, when: end.millisecondsSinceEpoch, usesChronometer: true, chronometerCountDown: true,
+  ));
+
+  static Future<void> _showLaundryCountdownNow(String title, DateTime end) =>
+      _plugin.show(_laundryCountdownId, title, null, _laundryCountdownDetails(end));
+
+  static Future<void> _scheduleLaundryCountdownAt(DateTime start, String title, DateTime end) => _plugin.zonedSchedule(
+    _laundryCountdownId, title, null, tz.TZDateTime.from(start, tz.local), _laundryCountdownDetails(end),
+    androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+    payload: 'laundry',
+  );
+
+  // ขั้นนี้กำลังทำอยู่ตอนนี้ → โชว์นับถอยหลังเลย · ยังไม่เริ่ม → ตั้งให้โผล่ (แทนที่ของขั้นก่อน) ตอนขั้นนี้เริ่ม
+  static Future<void> _showOrScheduleLaundryCountdown(LaundryStep step, DateTime start, DateTime end, DateTime now) async {
+    if (!end.isAfter(now)) return;
+    final title = '${step.emoji} กำลัง${step.label}';
+    if (!start.isAfter(now)) {
+      await _showLaundryCountdownNow(title, end);
+    } else {
+      await _scheduleLaundryCountdownAt(start, title, end);
+    }
+  }
+
+  static NotificationDetails _laundryAlarmDetails({bool askWaterOff = false, bool nextStep = false, bool nextRound = false}) =>
+      NotificationDetails(android: AndroidNotificationDetails(
+    'laundry_alarm', 'ซักผ้า (เสียงปลุก)',
+    // ดังที่ "ระดับเสียงปลุก" เดิมของเครื่องเท่านั้น — ห้ามเพิ่มโค้ดดันเสียงเครื่อง หรือ FLAG_INSISTENT (เสียงวนจนกว่าจะกดปุ่มเดียว เท่านั้นถึงหยุด)
+    channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา ดังแม้ปิดเสียงแต่ไม่ดันเสียงเครื่อง ปัด/กดอะไรก็หยุดได้',
+    importance: Importance.max, priority: Priority.max,
+    category: AndroidNotificationCategory.alarm,
+    audioAttributesUsage: AudioAttributesUsage.alarm,
+    actions: [
+      if (askWaterOff) const AndroidNotificationAction(_waterOffAction, 'ปิดน้ำแล้ว ✓', showsUserInterface: true, cancelNotification: true),
+      if (nextStep) const AndroidNotificationAction(_nextStepAction, 'ไปขั้นต่อไป ▶', showsUserInterface: true, cancelNotification: true),
+      if (nextRound) const AndroidNotificationAction(_nextRoundAction, 'เริ่มรอบ 2 (เปิดน้ำแล้ว)', showsUserInterface: true, cancelNotification: true),
+    ],
+  ));
+
+  static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false, bool nextStep = false, bool nextRound = false}) async {
+    NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
+    final details = _laundryAlarmDetails(askWaterOff: askWaterOff, nextStep: nextStep, nextRound: nextRound);
+    Future<void> schedule(AndroidScheduleMode mode) => _plugin.zonedSchedule(
+      id, title, body, tz.TZDateTime.from(at, tz.local), details,
+      androidScheduleMode: mode,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      payload: 'laundry',
+    );
+    try {
+      await schedule(AndroidScheduleMode.exactAllowWhileIdle);
+    } on PlatformException {
+      // Android 14+ ยังไม่ได้อนุญาต "การปลุกและการช่วยเตือน" → ใช้แบบไม่ตรงเป๊ะแทน (อาจช้าไปบ้าง)
+      await schedule(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
+  }
+
+  // โชว์แจ้งเตือนขั้นครบเวลาทันที (ใช้ตอน resync เจอขั้นที่ครบไปแล้วกำลังรอกด — เวลาเดิมอยู่ในอดีต zonedSchedule จะไม่เด้ง)
+  static Future<void> _laundryNow(int id, DateTime at, String title, String body, {bool nextStep = false, bool nextRound = false}) async {
+    NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
+    await _plugin.show(id, title, body, _laundryAlarmDetails(nextStep: nextStep, nextRound: nextRound), payload: 'laundry');
+  }
+
+  // [now] = ข้ามอันที่เลยเวลาไปแล้ว (ตอนตั้งใหม่ให้รอบที่ค้างอยู่)
+  static Future<void> scheduleLaundryFill(int round, DateTime end, {DateTime? now}) async {
+    if (!_ready) return;
+    final n = now ?? DateTime.now();
+    final fill = laundryRounds[round].fill;
+    final (title, body) = laundryEndText(round, fill);
+    final every = LaundrySettings.nagEvery;
+    for (var i = 0; i <= _laundryNagCount; i++) {
+      final at = end.add(Duration(minutes: every * i));
+      if (!at.isAfter(n)) continue;
+      await _laundryAt(_laundryFillId + i, at,
+          i == 0 ? title : '🚰 ยังไม่ได้ปิดน้ำ?',
+          i == 0 ? body : 'ปล่อยน้ำเข้าเกินมา ${every * i} นาทีแล้ว', askWaterOff: true);
+    }
+    await _showOrScheduleLaundryCountdown(fill, n, end, n); // ปล่อยน้ำเข้าเริ่มทันทีที่เรียกเสมอ
+    await NotifLog.save();
+  }
+
+  // ตั้งแจ้งเตือน + นับถอยหลังของ "ขั้นซักขั้นเดียว" (step) ที่กำลังจับเวลาอยู่ (เริ่มตอน end - minutes)
+  // ครบเวลาแล้วเด้งแจ้งเตือนพร้อมปุ่มให้กดไปขั้นต่อไป/เริ่มรอบ 2 (ขั้นสุดท้ายรอบสุดท้ายไม่มีปุ่ม) + ถามซ้ำทุก nagEvery นาที
+  static Future<void> scheduleLaundryStep(int round, int step, DateTime end, {DateTime? now}) async {
+    if (!_ready) return;
+    final n = now ?? DateTime.now();
+    final def = laundryRounds[round];
+    final s = def.wash[step.clamp(0, def.wash.length - 1)];
+    final isLast = step >= def.wash.length - 1;
+    final askNext = !isLast;            // ขั้นกลาง → ปุ่ม "ไปขั้นต่อไป"
+    final nextRound = s.nextRound;      // ขั้นสุดท้ายรอบ 1 → ปุ่ม "เริ่มรอบ 2"
+    final (title, body) = laundryEndText(round, s);
+    final every = LaundrySettings.nagEvery;
+    for (var i = 0; i <= _laundryWashNagCount; i++) {
+      final at = end.add(Duration(minutes: every * i));
+      final nagTitle = i == 0 ? title : '${s.emoji} ${s.label}ครบแล้ว';
+      final nagBody = i == 0 ? body
+          : 'ครบมา ${every * i} นาทีแล้ว — ${askNext ? 'กด "ไปขั้นต่อไป"' : nextRound ? 'กด "เริ่มรอบ 2"' : 'เอาผ้าไปตากได้เลย'}';
+      if (at.isAfter(n)) {
+        await _laundryAt(_laundryWashId + i, at, nagTitle, nagBody, nextStep: askNext, nextRound: nextRound);
+      } else if (i == 0) {
+        // ขั้นนี้ครบไปแล้วแต่ยังไม่ได้กด (เช่นหลังล้างแจ้งเตือน/เปิดแอพ) → เด้งเตือนให้กดทันที
+        await _laundryNow(_laundryWashId, n, nagTitle, nagBody, nextStep: askNext, nextRound: nextRound);
+      }
+    }
+    await _showOrScheduleLaundryCountdown(s, n, end, n); // ขั้นนี้กำลังจับเวลาตั้งแต่ตอนนี้
+    await NotifLog.save();
+  }
+
+  // ยกเลิกตัวจับเวลาซักผ้าทั้งหมด (ไม่รวมเตือนวันเสาร์) + ปิดแจ้งเตือนที่ค้างอยู่บนเครื่อง
+  static Future<void> cancelLaundry() async {
+    if (!_ready) return;
+    await _plugin.cancel(_laundryCountdownId);
+    for (var id = _laundryFillId; id < laundryDayId; id++) {
+      await _plugin.cancel(id);
+    }
+    NotifLog.removeFuture((x) => x >= _laundryFillId && x < laundryDayId);
+    await NotifLog.save();
+  }
+
+  // เปลี่ยนวัน/เวลาวันซักผ้าในหน้าตั้งค่า → ตั้งใหม่
+  static Future<void> rescheduleLaundryDay() async {
+    if (!_ready) return;
+    await _plugin.cancel(laundryDayId);
+    await _scheduleLaundryDay();
+  }
+
+  static Future<void> _scheduleLaundryDay() async {
+    // ตั้งไว้แล้วไม่ต้องตั้งใหม่ — ยกเลิกแล้วคิดจากตอนนี้ จะข้ามวันนี้ถ้าเปิดแอพหลังเวลาเตือน ก่อน Android ส่งแจ้งเตือน
+    if ((await _plugin.pendingNotificationRequests()).any((p) => p.id == laundryDayId)) return;
+    await _plugin.zonedSchedule(
+      laundryDayId,
+      '🧺 วันนี้วันซักผ้า',
+      'กดเพื่อเริ่มปล่อยน้ำเข้า ${laundryRounds.first.fill.minutes} นาที',
+      tz.TZDateTime.from(nextLaundryDay(DateTime.now(), LaundrySettings.weekday, LaundrySettings.hour, LaundrySettings.minute), tz.local),
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'laundry_day', 'วันซักผ้าประจำสัปดาห์',
+        importance: Importance.defaultImportance, priority: Priority.defaultPriority,
+      )),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      payload: 'laundry',
     );
   }
 }
