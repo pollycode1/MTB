@@ -4,12 +4,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_service.dart';
 
 // ── ซักผ้า (ทุกวันเสาร์ หรือกดเองวันไหนก็ได้) ─────────────────────────────────────
-// รอบ 1 ซัก: ปล่อยน้ำเข้า 5 → (กด "ปิดน้ำแล้ว") → แช่ผ้า 20 → ปั่น 10 → ปล่อยน้ำออก 3
-// รอบ 2 น้ำยาปรับผ้านุ่ม: (กด "เริ่มรอบ 2") ปล่อยน้ำเข้า 5 → (กด "ปิดน้ำแล้ว") → ปั่นกับน้ำยา 10 → ปล่อยน้ำออก 3
+// รอบ 1 ซัก: ปล่อยน้ำเข้า 5 → (กด "ปิดน้ำแล้ว") → แช่ผ้า 20 → (กด "ไปขั้นต่อไป") → ปั่น 10 → (กด) → ปล่อยน้ำออก 3
+// รอบ 2 น้ำยาปรับผ้านุ่ม: (กด "เริ่มรอบ 2") ปล่อยน้ำเข้า 5 → (กด "ปิดน้ำแล้ว") → ปั่นกับน้ำยา 10 → (กด) → ปล่อยน้ำออก 3
+// ทุกขั้นครบเวลาแล้วจะ "หยุดรอให้กดก่อน" เสมอ ไม่เดินหน้าเอง (เฟส waitStep) — ผู้ใช้ต้องกดจึงเริ่มจับเวลาขั้นต่อไป
 // (นาทีคือค่าเริ่มต้น ปรับเองได้ในหน้าตั้งค่าซักผ้า → LaundrySettings)
-// เก็บแค่รอบที่ + เวลาเริ่ม 2 ค่า ที่เหลือคิดจากเวลาปัจจุบัน → ปิดแอพไปแล้วกลับมาก็ยังนับถูก
+// เก็บรอบที่ + เวลาเริ่มปล่อยน้ำ + เวลาเริ่มขั้นซักปัจจุบัน + ลำดับขั้นซักปัจจุบัน → ปิดแอพไปแล้วกลับมาก็ยังนับถูก
 
-enum LaundryPhase { idle, filling, waitWaterOff, soak, spin, drain, betweenRounds, done }
+// waitStep = ขั้นซักครบเวลาแล้ว กำลังรอผู้ใช้กด "ไปขั้นต่อไป" ก่อนเริ่มจับเวลาขั้นถัดไป
+enum LaundryPhase { idle, filling, waitWaterOff, soak, spin, drain, waitStep, betweenRounds, done }
 
 class LaundryStep {
   final String key; // ใช้เก็บเวลาที่ผู้ใช้ปรับเอง
@@ -55,7 +57,7 @@ const laundryRounds = [
   final k = def.wash.indexOf(s);
   if (k >= 0 && k < def.wash.length - 1) {
     final next = def.wash[k + 1];
-    return ('${s.emoji} ${s.label}ครบ ${s.minutes} นาที', 'ได้เวลา${next.label} ${next.minutes} นาที');
+    return ('${s.emoji} ${s.label}ครบ ${s.minutes} นาที', 'กด "ไปขั้นต่อไป" เพื่อเริ่ม${next.label} ${next.minutes} นาที');
   }
   if (round < laundryRounds.length - 1) {
     return ('${s.emoji} ${s.label}ครบ — ต่อรอบ 2', 'เปิดน้ำเข้า ใส่น้ำยาปรับผ้านุ่ม แล้วกด "เริ่มรอบ 2"');
@@ -118,15 +120,23 @@ class LaundryStatus {
   Duration left(DateTime now) => endsAt == null || !endsAt!.isAfter(now) ? Duration.zero : endsAt!.difference(now);
 }
 
-LaundryStatus laundryStatus(int round, DateTime? fillAt, DateTime? washAt, DateTime now) {
+LaundryStatus laundryStatus(int round, DateTime? fillAt, DateTime? washAt, int washStep, DateTime now) {
   final r = round.clamp(0, laundryRounds.length - 1);
   final def = laundryRounds[r];
   final start = _rowStart(r);
   if (washAt != null) {
-    var end = washAt;
-    for (final (k, s) in def.wash.indexed) {
-      end = end.add(Duration(minutes: s.minutes));
-      if (now.isBefore(end)) return LaundryStatus(s.phase, round: r, pos: start + 1 + k, endsAt: end);
+    // จับเวลาทีละขั้นเท่านั้น (washStep) — ครบแล้วหยุดรอกด ไม่เดินไปขั้นถัดไปเอง
+    final k = washStep.clamp(0, def.wash.length - 1);
+    final s = def.wash[k];
+    final end = washAt.add(Duration(minutes: s.minutes));
+    final pos = start + 1 + k;
+    if (now.isBefore(end)) return LaundryStatus(s.phase, round: r, pos: pos, endsAt: end);
+    // ขั้นนี้ครบเวลาแล้ว
+    if (k < def.wash.length - 1) {
+      // ยังมีขั้นถัดไปในรอบนี้ → รอกด "ไปขั้นต่อไป" (ค้างไว้นานเกิน 3 ชม. = เริ่มใหม่)
+      return now.difference(end) < const Duration(hours: 3)
+          ? LaundryStatus(LaundryPhase.waitStep, round: r, pos: pos, endsAt: end)
+          : const LaundryStatus(LaundryPhase.idle);
     }
     if (r < laundryRounds.length - 1) {
       // รอเริ่มรอบถัดไป · ทิ้งไว้นานเกิน 3 ชม. = เริ่มใหม่
@@ -150,11 +160,9 @@ LaundryStatus laundryStatus(int round, DateTime? fillAt, DateTime? washAt, DateT
   return const LaundryStatus(LaundryPhase.idle);
 }
 
-// เวลาที่แต่ละขั้นต่อจากกดปิดน้ำของรอบนี้ครบ
-List<(LaundryStep, DateTime)> laundryWashEnds(int round, DateTime washAt) {
-  var end = washAt;
-  return [for (final s in laundryRounds[round].wash) (s, end = end.add(Duration(minutes: s.minutes)))];
-}
+// เวลาจบของขั้นซัก [step] ถ้าเริ่มจับเวลาตอน [washAt]
+DateTime laundryStepEnd(int round, int step, DateTime washAt) =>
+    washAt.add(Duration(minutes: laundryRounds[round].wash[step.clamp(0, laundryRounds[round].wash.length - 1)].minutes));
 
 // วันซักผ้าครั้งถัดไป (ถ้าวันนี้ใช่และยังไม่ถึงเวลา = วันนี้)
 DateTime nextLaundryDay(DateTime now, int weekday, int hour, [int minute = 0]) {
@@ -170,16 +178,21 @@ String laundryDayLabel() =>
     'วัน${laundryWeekdays[LaundrySettings.weekday - 1]} ${LaundrySettings.hour.toString().padLeft(2, '0')}:${LaundrySettings.minute.toString().padLeft(2, '0')}';
 
 class Laundry {
-  static const _pref = 'laundry_state'; // {"round": 0|1, "fill": iso, "wash": iso} เก็บรวมใน key เดียว
+  static const _pref = 'laundry_state'; // {"round": 0|1, "fill": iso, "wash": iso, "step": int} เก็บรวมใน key เดียว
   static int round = 0;
   static DateTime? fillAt, washAt;
+  static int washStep = 0; // ลำดับขั้นซักที่กำลังจับเวลา/เพิ่งครบ (index ใน round.wash)
   static final changed = ValueNotifier<int>(0); // หน้าซักผ้าฟังไว้ (กดปุ่มในแจ้งเตือนตอนเปิดหน้าอยู่)
   static Future<void> _queue = Future.value();
 
   // ทำทีละคำสั่ง: กดเริ่ม/ปิดน้ำ/ยกเลิกซ้อนกัน (เช่นกดในแจ้งเตือนกับในแอพพร้อมกัน) ไม่ให้สถานะกับแจ้งเตือนเพี้ยน
   static Future<void> _serial(Future<void> Function() f) => _queue = _queue.then((_) => f()).catchError((_) {});
 
-  static LaundryStatus status([DateTime? now]) => laundryStatus(round, fillAt, washAt, now ?? DateTime.now());
+  // คิวเป็น static ข้ามเทสต์ — เทสต์ที่รันคนละ zone (async ปกติ vs FakeAsync ใน testWidgets) ต้องรีเซ็ตคิวในโซนตัวเองก่อนใช้
+  @visibleForTesting
+  static void resetQueueForTest() => _queue = Future.value();
+
+  static LaundryStatus status([DateTime? now]) => laundryStatus(round, fillAt, washAt, washStep, now ?? DateTime.now());
 
   static Future<void> load() async {
     await LaundrySettings.load();
@@ -189,9 +202,11 @@ class Laundry {
       round = (j['round'] as num?)?.toInt() ?? 0;
       fillAt = DateTime.tryParse(j['fill'] as String? ?? '');
       washAt = DateTime.tryParse(j['wash'] as String? ?? '');
+      washStep = (j['step'] as num?)?.toInt() ?? 0;
     } catch (_) {
       round = 0;
       fillAt = washAt = null;
+      washStep = 0;
     }
     changed.value++;
   }
@@ -202,6 +217,7 @@ class Laundry {
       'round': round,
       if (fillAt != null) 'fill': fillAt!.toIso8601String(),
       if (washAt != null) 'wash': washAt!.toIso8601String(),
+      'step': washStep,
     }));
     changed.value++;
   }
@@ -210,9 +226,18 @@ class Laundry {
     round = r;
     fillAt = DateTime.now();
     washAt = null;
+    washStep = 0;
     await _save();
     await NotificationService.cancelLaundry();
     await NotificationService.scheduleLaundryFill(r, fillAt!.add(Duration(minutes: laundryRounds[r].fill.minutes)));
+  }
+
+  // เริ่มจับเวลาขั้นซัก [washStep] ปัจจุบัน (เรียกตอนกดปิดน้ำ/กดไปขั้นต่อไป)
+  static Future<void> _startWashStep() async {
+    washAt = DateTime.now();
+    await _save();
+    await NotificationService.cancelLaundry();
+    await NotificationService.scheduleLaundryStep(round, washStep, laundryStepEnd(round, washStep, washAt!));
   }
 
   // เริ่มปล่อยน้ำเข้า: ถ้ารอรอบ 2 อยู่ = เริ่มรอบ 2 · นอกนั้น = เริ่มรอบ 1 ใหม่
@@ -228,16 +253,22 @@ class Laundry {
     if (st.phase == LaundryPhase.betweenRounds) await _fill(st.round);
   });
 
-  // ปิดน้ำแล้ว → ขั้นที่เหลือของรอบนี้ต่อกันอัตโนมัติ
+  // ปิดน้ำแล้ว → เริ่มจับเวลา "ขั้นแรก" ของรอบ (แช่/ปั่น) · ขั้นถัดไปต้องกด "ไปขั้นต่อไป" เอง
   // รับเฉพาะตอนกำลังปล่อยน้ำเข้า/รอปิดน้ำ (กดแจ้งเตือนเก่าที่ค้าง หรือกดซ้ำ ไม่เริ่มรอบใหม่)
   static Future<void> confirmWaterOff() => _serial(() async {
     await load();
     final phase = status().phase;
     if (phase != LaundryPhase.filling && phase != LaundryPhase.waitWaterOff) return;
-    washAt = DateTime.now();
-    await _save();
-    await NotificationService.cancelLaundry();
-    await NotificationService.scheduleLaundryWash(round, laundryWashEnds(round, washAt!));
+    washStep = 0;
+    await _startWashStep();
+  });
+
+  // ไปขั้นต่อไป → เริ่มจับเวลาขั้นซักถัดไป · รับเฉพาะตอนขั้นปัจจุบันครบเวลาแล้ว (waitStep)
+  static Future<void> confirmNextStep() => _serial(() async {
+    await load();
+    if (status().phase != LaundryPhase.waitStep) return;
+    washStep += 1;
+    await _startWashStep();
   });
 
   // เปลี่ยนเวลาในหน้าตั้งค่า → ตั้งแจ้งเตือนของรอบที่กำลังซักใหม่ตามเวลาใหม่ + วันซักผ้าประจำสัปดาห์
@@ -253,6 +284,7 @@ class Laundry {
     round = 0;
     fillAt = null;
     washAt = null;
+    washStep = 0;
     await _save();
     await NotificationService.cancelLaundry();
   });
@@ -264,8 +296,9 @@ class Laundry {
       case LaundryPhase.filling || LaundryPhase.waitWaterOff:
         final fill = laundryRounds[round].fill;
         await NotificationService.scheduleLaundryFill(round, fillAt!.add(Duration(minutes: fill.minutes)), now: now);
-      case LaundryPhase.soak || LaundryPhase.spin || LaundryPhase.drain:
-        await NotificationService.scheduleLaundryWash(round, laundryWashEnds(round, washAt!), now: now);
+      // กำลังจับเวลาขั้นซัก หรือครบแล้วรอกด (waitStep) → ตั้งแจ้งเตือน/นับถอยหลังของขั้นปัจจุบันกลับ
+      case LaundryPhase.soak || LaundryPhase.spin || LaundryPhase.drain || LaundryPhase.waitStep:
+        await NotificationService.scheduleLaundryStep(round, washStep, laundryStepEnd(round, washStep, washAt!), now: now);
       case LaundryPhase.idle || LaundryPhase.betweenRounds || LaundryPhase.done:
         break;
     }

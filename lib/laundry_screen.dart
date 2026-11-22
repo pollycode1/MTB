@@ -38,14 +38,18 @@ class _LaundryScreenState extends State<LaundryScreen> {
     final st = Laundry.status(now);
     final isSat = now.weekday == LaundrySettings.weekday;
     final round2 = st.round == 1;
+    // ขั้นถัดไปที่จะเริ่มเมื่อกด (ตอนขั้นปัจจุบันครบเวลาแล้ว รอกด)
+    final nextStep = st.phase == LaundryPhase.waitStep && st.pos + 1 < laundryRows.length ? laundryRows[st.pos + 1].$2 : null;
     final (headline, sub) = switch (st.phase) {
       LaundryPhase.idle => (isSat ? 'วันนี้วันซักผ้า 🧺' : 'ซักผ้า', 'เริ่มได้ทุกวัน กดตอนเปิดน้ำเข้าเครื่อง'),
       LaundryPhase.waitWaterOff => ('ปิดน้ำหรือยัง?', 'ครบ 5 นาทีแล้ว ปิดน้ำแล้วกดปุ่มด้านล่าง'),
+      LaundryPhase.waitStep => ('${st.step?.label ?? ''}ครบแล้ว',
+          nextStep == null ? 'กดเพื่อไปขั้นต่อไป' : 'กดเพื่อเริ่ม${nextStep.label} ${nextStep.minutes} นาที'),
       LaundryPhase.betweenRounds => ('ต่อรอบ 2', 'เปิดน้ำเข้า ใส่น้ำยาปรับผ้านุ่ม แล้วกดเริ่ม'),
       LaundryPhase.done => ('เสร็จแล้ว ✅', 'เอาผ้าไปตากได้เลย'),
       _ => (_mmss(st.left(now)), '${laundryRounds[st.round].name} · กำลัง${st.step?.label ?? ''}'),
     };
-    final waiting = st.phase == LaundryPhase.waitWaterOff;
+    final waiting = st.phase == LaundryPhase.waitWaterOff || st.phase == LaundryPhase.waitStep;
     return Scaffold(
       backgroundColor: kCBg,
       appBar: AppBar(
@@ -77,9 +81,12 @@ class _LaundryScreenState extends State<LaundryScreen> {
           _bigButton('เริ่มปล่อยน้ำเข้า (5 นาที)', Icons.water_drop_outlined, kCGreen, Laundry.startFill),
         if (st.phase == LaundryPhase.betweenRounds)
           _bigButton('เริ่มรอบ 2 — ปล่อยน้ำเข้า (5 นาที)', Icons.water_drop_outlined, kCGreen, Laundry.startFill),
-        if (st.phase == LaundryPhase.filling || waiting)
+        if (st.phase == LaundryPhase.filling || st.phase == LaundryPhase.waitWaterOff)
           _bigButton(round2 ? 'ปิดน้ำแล้ว — เริ่มปั่นกับน้ำยา' : 'ปิดน้ำแล้ว — เริ่มแช่ผ้า',
-            Icons.check_rounded, waiting ? kCRed : kCSurf, Laundry.confirmWaterOff),
+            Icons.check_rounded, st.phase == LaundryPhase.waitWaterOff ? kCRed : kCSurf, Laundry.confirmWaterOff),
+        if (st.phase == LaundryPhase.waitStep)
+          _bigButton(nextStep == null ? 'ไปขั้นต่อไป' : 'เริ่ม${nextStep.label} (${nextStep.minutes} นาที)',
+            Icons.play_arrow_rounded, kCRed, Laundry.confirmNextStep),
         const SizedBox(height: 24),
         for (final (i, (r, s)) in laundryRows.indexed) ...[
           if (i == 0 || laundryRows[i - 1].$1 != r)
@@ -90,8 +97,9 @@ class _LaundryScreenState extends State<LaundryScreen> {
           _stepRow(i, s, st, now),
         ],
         const SizedBox(height: 16),
-        Text('กดเริ่มเองได้ทุกวัน (ปุ่ม 🧺 มุมบนของหน้าแรก) · ทุก${laundryDayLabel()} มีแจ้งเตือนวันซักผ้าด้วย · แต่ละขั้นครบเวลาจะแจ้งเตือน '
-            'ตอนปล่อยน้ำเข้าครบกด "ปิดน้ำแล้ว" ในแจ้งเตือนได้เลย (ถ้ายังไม่กดจะถามซ้ำทุก ${LaundrySettings.nagEvery} นาที) · จบรอบ 1 กด "เริ่มรอบ 2" ในแจ้งเตือนได้ · '
+        Text('กดเริ่มเองได้ทุกวัน (ปุ่ม 🧺 มุมบนของหน้าแรก) · ทุก${laundryDayLabel()} มีแจ้งเตือนวันซักผ้าด้วย · '
+            'ทุกขั้นครบเวลาจะเตือนแล้ว "หยุดรอให้กดก่อน" ไม่เดินหน้าเอง — ปล่อยน้ำเข้าครบกด "ปิดน้ำแล้ว" ขั้นอื่นกด "ไปขั้นต่อไป" '
+            '(ถ้ายังไม่กดจะเตือนซ้ำทุก ${LaundrySettings.nagEvery} นาที) · จบรอบ 1 กด "เริ่มรอบ 2" ในแจ้งเตือนได้ · '
             'ปรับเวลาทุกขั้นได้ที่ปุ่ม ⚙ มุมขวาบน',
           style: TextStyle(fontSize: 11.5, height: 1.5, color: kCText.withValues(alpha: .4))),
       ]),
@@ -106,11 +114,11 @@ class _LaundryScreenState extends State<LaundryScreen> {
     label: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
   );
 
-  // i = ลำดับใน laundryRows · ก่อนขั้นปัจจุบัน = เสร็จ (ขั้นปล่อยน้ำเข้าถือว่าเสร็จตั้งแต่รอปิดน้ำ)
+  // i = ลำดับใน laundryRows · ก่อนขั้นปัจจุบัน = เสร็จ (ขั้นที่ครบเวลาแล้วรอกด ก็ถือว่าเสร็จแล้ว)
   Widget _stepRow(int i, LaundryStep s, LaundryStatus st, DateTime now) {
-    final fillDone = st.phase == LaundryPhase.waitWaterOff && i == st.pos;
-    final done = i < st.pos || fillDone;
-    final active = i == st.pos && !fillDone && st.endsAt != null;
+    final stepDone = (st.phase == LaundryPhase.waitWaterOff || st.phase == LaundryPhase.waitStep) && i == st.pos;
+    final done = i < st.pos || stepDone;
+    final active = i == st.pos && !stepDone && st.endsAt != null;
     final next = i == st.pos && st.phase == LaundryPhase.betweenRounds;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -169,11 +177,12 @@ class _LaundryCardState extends State<LaundryCard> {
     final text = switch (st.phase) {
       LaundryPhase.idle => 'วันนี้วันซักผ้า · กดเพื่อเริ่มปล่อยน้ำเข้า',
       LaundryPhase.waitWaterOff => 'ปิดน้ำหรือยัง? กดเพื่อยืนยัน',
+      LaundryPhase.waitStep => '${st.step?.label ?? ''}ครบแล้ว · กดเพื่อไปขั้นต่อไป',
       LaundryPhase.betweenRounds => 'ต่อรอบ 2 · เปิดน้ำ ใส่น้ำยาปรับผ้านุ่ม แล้วกดเริ่ม',
       LaundryPhase.done => 'ซักผ้าเสร็จแล้ว ✅',
       _ => '${st.round == 1 ? 'รอบ 2 · ' : ''}กำลัง${st.step?.label ?? ''} · อีก $mins นาที',
     };
-    final alert = st.phase == LaundryPhase.waitWaterOff || st.phase == LaundryPhase.betweenRounds;
+    final alert = st.phase == LaundryPhase.waitWaterOff || st.phase == LaundryPhase.waitStep || st.phase == LaundryPhase.betweenRounds;
     return GestureDetector(
       onTap: widget.onTap,
       child: Container(
