@@ -262,10 +262,12 @@ class NotificationService {
   static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false, bool nextRound = false}) async {
     NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
     final details = NotificationDetails(android: AndroidNotificationDetails(
-      'laundry_timer', 'จับเวลาซักผ้า',
-      channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา',
+      'laundry_alarm', 'ซักผ้า (เสียงปลุก)',
+      // ดังที่ "ระดับเสียงปลุก" เดิมของเครื่องเท่านั้น — ห้ามเพิ่มโค้ดดันเสียงเครื่อง หรือ FLAG_INSISTENT (เสียงวนจนกว่าจะกดปุ่มเดียว เท่านั้นถึงหยุด)
+      channelDescription: 'แจ้งเมื่อปล่อยน้ำ/แช่/ปั่นครบเวลา ดังแม้ปิดเสียงแต่ไม่ดันเสียงเครื่อง ปัด/กดอะไรก็หยุดได้',
       importance: Importance.max, priority: Priority.max,
       category: AndroidNotificationCategory.alarm,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
       actions: [
         if (askWaterOff) const AndroidNotificationAction(_waterOffAction, 'ปิดน้ำแล้ว ✓', showsUserInterface: true, cancelNotification: true),
         if (nextRound) const AndroidNotificationAction(_nextRoundAction, 'เริ่มรอบ 2 (เปิดน้ำแล้ว)', showsUserInterface: true, cancelNotification: true),
