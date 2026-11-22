@@ -6,6 +6,7 @@ import 'home_screen.dart';
 import 'schedule_data.dart';
 import 'tags.dart';
 import 'notification_service.dart';
+import 'laundry.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +16,7 @@ void main() async {
   await Attachments.init();
   await ScheduleStore.load();
   await Holidays.load();
+  await Laundry.load();
   runApp(const MTBApp());
 }
 
