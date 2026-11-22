@@ -222,10 +222,42 @@ class NotificationService {
   }
 
   // ── ซักผ้า ─────────────────────────────────────────────────────────────────
+  // 9988 = สถานะนับถอยหลังค้างไว้ใน status bar ของขั้นที่กำลังทำอยู่ (เงียบ ไม่มีเสียง/ปุ่ม อัปเดต/แทนที่ตอนเปลี่ยนขั้น)
   // 9990 = ปล่อยน้ำเข้าครบ (มีปุ่มปิดน้ำแล้ว) · 9991–9993 = ถามซ้ำทุก nagEvery นาทีถ้ายังไม่กด
   // 9994–9996 = ขั้นหลังปิดน้ำครบ (รอบ 1 แช่/ปั่น/ปล่อยออก · รอบ 2 ปั่นกับน้ำยา/ปล่อยออก) — ทีละรอบ จึงใช้ id ซ้ำได้ · 9997 = เตือนวันซักผ้าทุกเสาร์
   static const _waterOffAction = 'water_off', _nextRoundAction = 'next_round';
+  static const _laundryCountdownId = 9988;
   static const _laundryFillId = 9990, _laundryNagCount = 3, _laundryWashId = 9994, laundryDayId = 9997;
+
+  // แจ้งเตือนค้างไว้ (ongoing) โชว์นาฬิกานับถอยหลังของขั้นที่กำลังทำอยู่ใน status bar · เงียบ ไม่ปลุก ไม่มีปุ่ม
+  static NotificationDetails _laundryCountdownDetails(DateTime end) => NotificationDetails(android: AndroidNotificationDetails(
+    'laundry_countdown', 'นับถอยหลังซักผ้า',
+    channelDescription: 'ค้างไว้ใน status bar ระหว่างจับเวลาแต่ละขั้น',
+    importance: Importance.low, priority: Priority.low,
+    playSound: false, enableVibration: false, ongoing: true, onlyAlertOnce: true,
+    showWhen: true, when: end.millisecondsSinceEpoch, usesChronometer: true, chronometerCountDown: true,
+  ));
+
+  static Future<void> _showLaundryCountdownNow(String title, DateTime end) =>
+      _plugin.show(_laundryCountdownId, title, null, _laundryCountdownDetails(end));
+
+  static Future<void> _scheduleLaundryCountdownAt(DateTime start, String title, DateTime end) => _plugin.zonedSchedule(
+    _laundryCountdownId, title, null, tz.TZDateTime.from(start, tz.local), _laundryCountdownDetails(end),
+    androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+    payload: 'laundry',
+  );
+
+  // ขั้นนี้กำลังทำอยู่ตอนนี้ → โชว์นับถอยหลังเลย · ยังไม่เริ่ม → ตั้งให้โผล่ (แทนที่ของขั้นก่อน) ตอนขั้นนี้เริ่ม
+  static Future<void> _showOrScheduleLaundryCountdown(LaundryStep step, DateTime start, DateTime end, DateTime now) async {
+    if (!end.isAfter(now)) return;
+    final title = '${step.emoji} กำลัง${step.label}';
+    if (!start.isAfter(now)) {
+      await _showLaundryCountdownNow(title, end);
+    } else {
+      await _scheduleLaundryCountdownAt(start, title, end);
+    }
+  }
 
   static Future<void> _laundryAt(int id, DateTime at, String title, String body, {bool askWaterOff = false, bool nextRound = false}) async {
     NotifLog.add(NotifEntry(id, at, title, body, payload: 'laundry'));
@@ -257,7 +289,8 @@ class NotificationService {
   static Future<void> scheduleLaundryFill(int round, DateTime end, {DateTime? now}) async {
     if (!_ready) return;
     final n = now ?? DateTime.now();
-    final (title, body) = laundryEndText(round, laundryRounds[round].fill);
+    final fill = laundryRounds[round].fill;
+    final (title, body) = laundryEndText(round, fill);
     final every = LaundrySettings.nagEvery;
     for (var i = 0; i <= _laundryNagCount; i++) {
       final at = end.add(Duration(minutes: every * i));
@@ -266,6 +299,7 @@ class NotificationService {
           i == 0 ? title : '🚰 ยังไม่ได้ปิดน้ำ?',
           i == 0 ? body : 'ปล่อยน้ำเข้าเกินมา ${every * i} นาทีแล้ว', askWaterOff: true);
     }
+    await _showOrScheduleLaundryCountdown(fill, n, end, n); // ปล่อยน้ำเข้าเริ่มทันทีที่เรียกเสมอ
     await NotifLog.save();
   }
 
@@ -273,9 +307,12 @@ class NotificationService {
     if (!_ready) return;
     final n = now ?? DateTime.now();
     var id = _laundryWashId;
+    var start = ends.isEmpty ? n : ends.first.$2.subtract(Duration(minutes: ends.first.$1.minutes));
     for (final (s, at) in ends) {
       final (title, body) = laundryEndText(round, s);
       if (at.isAfter(n)) await _laundryAt(id, at, title, body, nextRound: s.nextRound);
+      await _showOrScheduleLaundryCountdown(s, start, at, n);
+      start = at;
       id++;
     }
     await NotifLog.save();
@@ -284,6 +321,7 @@ class NotificationService {
   // ยกเลิกตัวจับเวลาซักผ้าทั้งหมด (ไม่รวมเตือนวันเสาร์) + ปิดแจ้งเตือนที่ค้างอยู่บนเครื่อง
   static Future<void> cancelLaundry() async {
     if (!_ready) return;
+    await _plugin.cancel(_laundryCountdownId);
     for (var id = _laundryFillId; id < laundryDayId; id++) {
       await _plugin.cancel(id);
     }
