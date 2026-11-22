@@ -18,6 +18,8 @@ import 'schedule_screen.dart';
 import 'schedule_data.dart';
 import 'notification_service.dart';
 import 'notif_log.dart';
+import 'laundry.dart';
+import 'laundry_screen.dart';
 part 'home_today.dart';
 part 'home_inbox.dart';
 part 'home_ideas.dart';
@@ -79,6 +81,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     NotificationService.onWeeklyTap = _openWeeklySummary;
     NotificationService.onPlanTap = _openMorningPlan;
     NotificationService.onLastYearTap = _openLastYear;
+    NotificationService.onLaundryTap = _openLaundry;
+    NotificationService.onLaundryWaterOff = () => Laundry.confirmWaterOff().then((_) => _openLaundry());
+    NotificationService.onLaundryNextRound = () => Laundry.startNextRound().then((_) => _openLaundry());
     _loadTasks().then((_) async {
       _tasksLoaded = true;
       Tags.mergeFrom(_tasks);
@@ -93,6 +98,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _openMorningPlan();
       } else if (launch == 'lastyear') {
         _openLastYear();
+      } else if (launch == 'laundry') {
+        _openLaundry();
+      } else if (launch == 'laundry_water_off') {
+        Laundry.confirmWaterOff().then((_) => _openLaundry());
+      } else if (launch == 'laundry_next_round') {
+        Laundry.startNextRound().then((_) => _openLaundry());
       } else {
         _maybeShowMorningPlan();
       }
@@ -160,6 +171,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         _updateWidget();
       },
     ))).then((_) { if (mounted) setState(() {}); });
+  }
+
+  bool _laundryOpen = false; // กดแจ้งเตือนซ้ำตอนเปิดหน้าซักผ้าอยู่ → ไม่ซ้อนหน้า
+  void _openLaundry() {
+    if (!mounted || _laundryOpen) return;
+    _laundryOpen = true;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const LaundryScreen()))
+        .then((_) { _laundryOpen = false; if (mounted) setState(() {}); });
   }
 
   void _openSearch() {
@@ -534,6 +553,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         Text('เหลือ $remaining งาน', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: _cText)),
       ]),
       Row(children: [
+        GestureDetector(
+          onTap: _openLaundry, // เริ่มซักผ้าเองได้ทุกวัน (เสาร์มีการ์ด + แจ้งเตือนด้วย)
+          child: Container(
+            width: 36, height: 36,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: _cText.withValues(alpha: .07),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(Icons.local_laundry_service_outlined, size: 18, color: _cText.withValues(alpha: .55)),
+          ),
+        ),
         GestureDetector(
           onTap: _openSchedule,
           child: Container(
